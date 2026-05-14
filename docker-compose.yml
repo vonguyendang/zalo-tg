@@ -35,5 +35,25 @@ services:
       timeout: 5s
       retries: 5
 
+  zalo-tg:
+    build: .
+    image: zalo-tg:latest
+    container_name: zalo-tg
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - DATA_DIR=/app/data
+      - ZALO_CREDENTIALS_PATH=/app/data/credentials.json
+    volumes:
+      # Persistent data — lưu topics.json + credentials.json
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   telegram-bot-api-data:
