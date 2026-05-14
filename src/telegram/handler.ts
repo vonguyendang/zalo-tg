@@ -929,13 +929,14 @@ export function setupTelegramHandler(
       );
       groupsCache.set([]);
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
+      const errCode = (err as { code?: number })?.code;
+      const errMsg  = err instanceof Error ? err.message : String(err);
       console.error('[/joingroup]', err);
       // code 178 = already a member, 240 = requires admin approval
-      if (errMsg.includes('178')) {
+      if (errCode === 178 || errMsg.includes('178')) {
         await ctx.telegram.sendMessage(config.telegram.groupId, '⚠️ Bạn đã là thành viên nhóm này rồi.', replyOpts);
-      } else if (errMsg.includes('240')) {
-        await ctx.telegram.sendMessage(config.telegram.groupId, '⏳ Nhóm yêu cầu duyệt thành viên. Yêu cầu tham gia đã được gửi đi.', replyOpts);
+      } else if (errCode === 240 || errMsg.toLowerCase().includes('waiting') || errMsg.includes('240')) {
+        await ctx.telegram.sendMessage(config.telegram.groupId, '⏳ Nhóm yêu cầu duyệt thành viên. Yêu cầu tham gia đã được gửi — chờ admin duyệt.', replyOpts);
       } else {
         await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Không thể tham gia nhóm. Link có thể đã hết hạn hoặc không hợp lệ.', replyOpts);
       }
@@ -1192,8 +1193,13 @@ export function setupTelegramHandler(
         await ctx.editMessageReplyMarkup(undefined);
         groupsCache.set([]);
       } catch (err) {
+        const errCode = (err as { code?: number })?.code;
         console.error('[cb/jgi]', err);
-        await ctx.answerCbQuery('❌ Không thể tham gia nhóm');
+        if (errCode === 240) {
+          await ctx.answerCbQuery('⏳ Yêu cầu đã gửi — chờ admin duyệt');
+        } else {
+          await ctx.answerCbQuery('❌ Không thể tham gia nhóm');
+        }
       }
       return;
     }
