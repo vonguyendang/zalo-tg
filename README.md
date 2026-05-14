@@ -15,6 +15,7 @@ A bidirectional message bridge between **Zalo** and **Telegram**, implemented in
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Running](#running)
+- [Authentication](#authentication)
 - [Large File Transfer](#large-file-transfer--20-mb)
 - [Bot Commands](#bot-commands)
 - [Project Structure](#project-structure)
@@ -38,11 +39,14 @@ Both sides communicate through a set of in-memory and on-disk stores that mainta
         |
    zalo/client.ts         (authentication, session management)
         |
+   zalo/loginApp.ts       (PC App QR login — zaloapp.com session)
+   zalo/appApi.ts         (direct PC App API calls — separate rate-limit bucket)
+        |
    zalo/handler.ts        (decode incoming Zalo events → Telegram)
         |
    store.ts               (msgStore, sentMsgStore, pollStore,
         |                  mediaGroupStore, zaloAlbumStore,
-        |                  userCache, friendsCache, topicStore)
+        |                  userCache, aliasCache, friendsCache, topicStore)
         |
    telegram/handler.ts    (decode incoming Telegram updates → Zalo)
         |
@@ -101,7 +105,7 @@ Both sides communicate through a set of in-memory and on-disk stores that mainta
 
 **Message recall (undo)** — Zalo `undo` events trigger `deleteMessage` on the mirrored Telegram message. The `/recall` command triggers `api.undo` for messages the bot itself sent.
 
-**Mentions** — Zalo `@mention` spans are wrapped in `<b>` tags on Telegram. Telegram `@username` entities and plain-text `@Name` patterns are resolved to Zalo UIDs via `userCache` and forwarded as `mentions` in `sendMessage`. Captions on photos, videos, and documents are also mention-resolved.
+**Mentions** — Zalo `@mention` spans are wrapped in `<b>` tags on Telegram. Telegram `@username` entities and plain-text `@Name` patterns are resolved to Zalo UIDs via `userCache` and forwarded as `mentions` in `sendMessage`. **Aliases** (contact nicknames set in Zalo's address book) are also accepted as mention targets — `@Alias` resolves to the correct UID even when the display name is different. Captions on photos, videos, and documents are also mention-resolved.
 
 ### Poll Synchronisation
 
@@ -181,7 +185,48 @@ npm run build
 npm start
 ```
 
-On first run with no existing `credentials.json`, send `/login` inside any topic (or the General topic) of the bridged Telegram group. The bot will send a Zalo QR code image; scan it with the Zalo mobile app under **Settings → QR Code Login**.
+---
+
+## Authentication
+
+The bridge supports two independent Zalo login methods. Either can be used at any time via the corresponding bot command.
+
+### `/loginweb` — Web API (default)
+
+Uses the standard zca-js Web API session. This is the same flow as the original `/login` command.
+
+1. Send `/loginweb` in any topic of the bridged group.
+2. The bot replies with a Zalo QR code image.
+3. Scan it with the Zalo mobile app under **Settings → QR Code Login**.
+4. The session is saved to `data/credentials.json`.
+
+**Rate limits:** The Web API has per-endpoint rate limits (HTTP 221). Hitting them during startup with many groups is mitigated by the PC App fallback described below.
+
+### `/loginapp` — PC App API
+
+Uses the Zalo PC App session (`wpa.zaloapp.com` / `zaloapp.com` cookie domain). This session is stored separately and used for group-member lookups with a **different rate-limit bucket** from the Web API.
+
+1. Send `/loginapp` in any topic of the bridged group.
+2. The bot replies with a Zalo QR code (same visual appearance).
+3. Scan it with the Zalo mobile app — Zalo treats it as a PC App login.
+4. The session is saved to `data/app-session.json` (contains `zpw_enk`, `imei`, and `zaloapp.com` cookies).
+
+**Why use `/loginapp`:**
+- `populateGroupMemberCache` at startup calls `group-wpa.zaloapp.com` (PC App domain) instead of the Web API, avoiding rate-limit errors (code 221) that occur when many groups are processed simultaneously.
+- The member-name lookup (`profile-wpa.zaloapp.com/api/social/group/members`) also uses this session.
+- If no `app-session.json` exists, the bridge falls back gracefully to the Web API for all operations.
+
+### Member Cache Population (3-tier)
+
+When a group is first seen, `populateGroupMemberCache` resolves display names with this priority:
+
+| Tier | Source | Extra API call? |
+|---|---|---|
+| 1 | `currentMems` embedded in `getGroupInfo` response | No |
+| 2 | `profile-wpa.zaloapp.com/api/social/group/members` (PC App) | Yes — different rate bucket |
+| 3 | `getUserInfo` Web API | Yes — rate-limited |
+
+Tiers 2 and 3 are only called for UIDs not covered by tier 1 (typically none for groups under ~200 members).
 
 ---
 
@@ -271,7 +316,9 @@ For detailed installation on **macOS, Linux, Windows**, see [**Local Bot API Set
 
 | Command | Description |
 |---|---|
-| `/login` | Initiate Zalo QR code authentication |
+| `/login` | Initiate Zalo QR login (Web API — same as `/loginweb`) |
+| `/loginweb` | Initiate Zalo QR login via Web API; session saved to `credentials.json` |
+| `/loginapp` | Initiate Zalo QR login via PC App API; session saved to `app-session.json`. Enables rate-limit-free group member lookups |
 | `/search <query>` | Search Zalo friends list; select a result to create a DM topic |
 | `/recall` | Retract a message sent from Telegram to Zalo (reply to the target message) |
 | `/topic list` | List all active topic–conversation mappings |
@@ -294,19 +341,27 @@ src/
 │                               - pollStore       (poll ↔ TG poll message mapping)
 │                               - mediaGroupStore (TG media group buffer)
 │                               - zaloAlbumStore  (Zalo album buffer)
-│                               - userCache       (uid ↔ displayName)
+│                               - userCache       (uid ↔ displayName + group-scoped lookup)
+│                               - aliasCache      (uid ↔ alias + reverse alias→uid lookup)
 │                               - friendsCache    (friends list, 5-min TTL)
 ├── telegram/
-│   ├── bot.ts                Telegraf instance; sets allowedUpdates.
+│   ├── bot.ts                Telegraf instance; sets allowedUpdates and bot commands.
 │   └── handler.ts            Processes all Telegram updates and forwards to Zalo.
 │                             Handles: text, media, voice, sticker, poll, location,
 │                             contact, reaction, callback_query, poll_answer.
+│                             Mention resolution: display name → uid, then alias → uid.
 ├── zalo/
-│   ├── client.ts             Zalo API initialisation and QR login flow.
+│   ├── client.ts             Zalo API initialisation and Web API QR login flow.
+│   ├── loginApp.ts           PC App QR login flow (zaloapp.com session).
+│   │                         Saves data/app-session.json after successful login.
+│   ├── appApi.ts             Direct PC App API helpers (group-wpa.zaloapp.com,
+│   │                         profile-wpa.zaloapp.com). Used for rate-limit-free
+│   │                         group member lookups. AES-128/192/256 auto-detected.
 │   ├── types.ts              TypeScript interfaces and ZALO_MSG_TYPES constant.
 │   └── handler.ts            Processes all Zalo listener events and forwards to TG.
 │                             Handles: message (all msgTypes), undo, reaction,
 │                             group_event (join/leave/poll/update_board).
+│                             populateGroupMemberCache: 3-tier lookup strategy.
 └── utils/
     ├── format.ts             HTML escaping, mention application, caption helpers.
     └── media.ts              Temporary file download, cleanup, OGG→M4A conversion.
@@ -315,6 +370,19 @@ src/
 ---
 
 ## Data Files
+
+### `data/credentials.json`
+
+Zalo **Web API** session (set by `/loginweb` or `/login`). Contains the standard zca-js session token — treat as account credentials.
+
+### `data/app-session.json`
+
+Zalo **PC App** session (set by `/loginapp`). Contains:
+- `zpw_enk` — AES session encryption key (base64-encoded; 16 bytes = AES-128 auto-detected)
+- `imei` — device identifier
+- `cookies` — `zaloapp.com` raw cookie array
+
+This session is used exclusively by `appApi.ts` for calls to `group-wpa.zaloapp.com` and `profile-wpa.zaloapp.com`. **Listed in `.gitignore`**; treat with the same protection as `credentials.json`.
 
 ### `data/topics.json`
 
@@ -362,8 +430,9 @@ Zalo sets `realMsgId = 0` for messages that have no secondary ID. Because `Strin
 
 ## Security Considerations
 
-- `.env` and `credentials.json` are listed in `.gitignore` and must never be committed to version control.
-- `credentials.json` contains a Zalo session token equivalent to the account password. Treat it with the same level of protection.
+- `.env`, `credentials.json`, and `app-session.json` are listed in `.gitignore` and must never be committed to version control.
+- `credentials.json` contains a Zalo Web API session token equivalent to the account password. Treat it with the same level of protection.
+- `app-session.json` contains a Zalo PC App session equivalent to the account password. The same protection applies.
 - The bridge runs as a single-user system: the Telegram group should be private and restricted to trusted members only, as any member can send messages through the bridge.
 - All outbound HTTP requests to Telegram and Zalo use TLS. No credentials are logged.
 - The `/recall` command is unrestricted within the group — any group member can retract messages the bot sent. Restrict bot admin rights or group membership if this is a concern.
