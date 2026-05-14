@@ -4,7 +4,7 @@ import path from 'path';
 import QRCode from 'qrcode';
 
 import type { ZaloAPI, ZaloMessage, ZaloMediaContent, ZaloGroupInfoResponse } from './types.js';
-import { appGetGroupMembersInfo } from './appApi.js';
+import { appGetGroupInfo, appGetGroupMembersInfo } from './appApi.js';
 import { ZALO_MSG_TYPES } from './types.js';
 import { store } from '../store.js';
 import { tgBot } from '../telegram/bot.js';
@@ -63,21 +63,28 @@ function parseBankCardHtml(html: string): BankCardInfo | null {
  */
 async function populateGroupMemberCache(api: ZaloAPI, groupId: string): Promise<void> {
   try {
-    const info = await api.getGroupInfo(groupId) as {
-      gridInfoMap?: Record<string, {
-        memVerList?: string[];
-        currentMems?: Array<{ id: string; dName?: string; zaloName?: string }>;
-        totalMember?: number;
-        hasMoreMember?: number;
-      }>;
-    };
-    const groupData = info?.gridInfoMap?.[groupId];
+    // --- Step 1: try PC App endpoint first (group-wpa.zaloapp.com, separate rate-limit) ---
+    let groupData = await appGetGroupInfo(groupId);
+
+    if (!groupData) {
+      // Fallback: zca-js web API (rate-limited)
+      const info = await api.getGroupInfo(groupId) as {
+        gridInfoMap?: Record<string, {
+          memVerList?: string[];
+          currentMems?: Array<{ id: string; dName?: string; zaloName?: string }>;
+          totalMember?: number;
+          hasMoreMember?: number;
+        }>;
+      };
+      groupData = info?.gridInfoMap?.[groupId] ?? null;
+    }
+
     if (!groupData) {
       console.warn(`[Zalo] getGroupInfo: no data for group ${groupId}`);
       return;
     }
 
-    // --- Step 1: names already embedded in currentMems (zero extra API calls) ---
+    // --- Step 2: names already embedded in currentMems (zero extra API calls) ---
     const knownNames = new Map<string, string>();
     for (const m of (groupData.currentMems ?? [])) {
       const name = m.dName?.trim() || m.zaloName?.trim();
@@ -101,10 +108,10 @@ async function populateGroupMemberCache(api: ZaloAPI, groupId: string): Promise<
       if (name) { userCache.saveForGroup(uid, name, groupId); saved++; }
     }
 
-    // --- Step 2: remaining UIDs — try PC App API first, then fall back ---
+    // --- Step 3: remaining UIDs — try PC App profile endpoint first, then fall back ---
     const missingUids = allUids.filter(uid => !knownNames.has(uid));
     if (missingUids.length > 0) {
-      // Try PC App endpoint (profile-wpa.zaloapp.com) — potentially less rate-limited
+      // Try PC App endpoint (profile-wpa.zaloapp.com) — separate rate-limit bucket
       const appNames = await appGetGroupMembersInfo(missingUids).catch(() => null);
       const stillMissing: string[] = [];
 

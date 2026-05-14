@@ -17,6 +17,7 @@ import { config } from '../config.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+const GROUP_DOMAIN   = 'https://group-wpa.zaloapp.com';
 const PROFILE_DOMAIN = 'https://profile-wpa.zaloapp.com';
 const API_TYPE       = 30;
 const API_VERSION    = 671;
@@ -67,25 +68,12 @@ function decodeAes(ciphertext: string, zpwEnk: string): string {
   return Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8');
 }
 
-function signKey(endpointName: string, params: Record<string, unknown>): string {
-  const sorted = Object.keys(params).sort();
-  const seed   = 'zsecure' + endpointName + sorted.map(k => String(params[k])).join('');
-  return crypto.createHash('md5').update(seed, 'utf8').digest('hex');
-}
+// ── HTTP helpers ──────────────────────────────────────────────────────────────
 
-/** Build query-string params for POST-login PC App API endpoints. */
-function apiQueryParams(body: Record<string, unknown>, endpoint: string, zpwEnk: string): Record<string, string> {
-  const encrypted = encodeAes(JSON.stringify(body), zpwEnk);
-  const p: Record<string, unknown> = {
-    params:      encrypted,
-    zpw_type:    API_TYPE,
-    zpw_ver:     API_VERSION,
-  };
-  p['signkey'] = signKey(endpoint, p);
-  return Object.fromEntries(Object.entries(p).map(([k, v]) => [k, String(v)]));
+/** Common URL query params for PC App API requests. */
+function commonParams(imei: string): Record<string, string> {
+  return { zpw_type: String(API_TYPE), zpw_ver: String(API_VERSION), imei };
 }
-
-// ── HTTP session ──────────────────────────────────────────────────────────────
 
 function buildCookieHeader(cookies: Array<{ name: string; value: string; domain: string }>, url: string): string {
   const { hostname } = new URL(url);
@@ -95,6 +83,60 @@ function buildCookieHeader(cookies: Array<{ name: string; value: string; domain:
     .join('; ');
 }
 
+// ── Group info (PC App, bypasses web-API rate limit) ─────────────────────────
+
+export interface AppGroupData {
+  memVerList?:  string[];
+  currentMems?: Array<{ id: string; dName?: string; zaloName?: string }>;
+  totalMember?: number;
+  hasMoreMember?: number;
+}
+
+/**
+ * Fetch group info from the PC App group domain (group-wpa.zaloapp.com).
+ * Mirrors zca-js getGroupInfo but uses the PC App session cookies, which
+ * have a separate rate-limit bucket from the web API.
+ *
+ * Returns null if no app session is available or on error.
+ */
+export async function appGetGroupInfo(groupId: string): Promise<AppGroupData | null> {
+  const sess = loadAppSession();
+  if (!sess) return null;
+
+  const url = `${GROUP_DOMAIN}/api/group/getmg-v2`;
+  const body = { gridVerMap: JSON.stringify({ [groupId]: 0 }) };
+  const encBody = encodeAes(JSON.stringify(body), sess.zpw_enk);
+
+  try {
+    const resp = await axios.post<{ error_code: number; data?: string; error_message?: string }>(
+      url,
+      `params=${encodeURIComponent(encBody)}`,
+      {
+        params:  commonParams(sess.imei),
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent':   PC_UA,
+          'Cookie':       buildCookieHeader(sess.cookies, url),
+        },
+        timeout: 15_000,
+      },
+    );
+
+    if (resp.data.error_code !== 0 || !resp.data.data) {
+      console.warn(`[AppApi] getGroupInfo [${resp.data.error_code}] ${resp.data.error_message ?? ''}`);
+      return null;
+    }
+
+    const parsed = JSON.parse(decodeAes(resp.data.data, sess.zpw_enk)) as {
+      data?: { gridInfoMap?: Record<string, AppGroupData> };
+    };
+    return parsed?.data?.gridInfoMap?.[groupId] ?? null;
+  } catch (err) {
+    console.warn(`[AppApi] getGroupInfo failed:`, err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
 // ── Group member profiles ─────────────────────────────────────────────────────
 
 /**
@@ -102,8 +144,8 @@ function buildCookieHeader(cookies: Array<{ name: string; value: string; domain:
  *
  * Returns a Map<uid, displayName>. Returns null if no app session is available.
  *
- * Endpoint: GET profile-wpa.zaloapp.com/api/social/group/members
- * Uses AES-256-CBC encrypted params + signkey (PC App API pattern).
+ * Endpoint: POST profile-wpa.zaloapp.com/api/social/group/members
+ * Uses AES-256-CBC encrypted params (PC App API pattern, same domain cookies).
  */
 export async function appGetGroupMembersInfo(uids: string[]): Promise<Map<string, string> | null> {
   const sess = loadAppSession();
@@ -116,20 +158,24 @@ export async function appGetGroupMembersInfo(uids: string[]): Promise<Map<string
     const batch = uids.slice(i, i + BATCH);
     const friendPversionMap = batch.map(u => u.endsWith('_0') ? u : u + '_0');
 
-    const body = { friend_pversion_map: friendPversionMap };
-    const qp   = apiQueryParams(body as Record<string, unknown>, 'members', sess.zpw_enk);
-    const url  = PROFILE_DOMAIN + '/api/social/group/members';
+    const body    = { friend_pversion_map: friendPversionMap };
+    const encBody = encodeAes(JSON.stringify(body), sess.zpw_enk);
+    const url     = `${PROFILE_DOMAIN}/api/social/group/members`;
 
     try {
-      const resp = await axios.get<{ error_code: number; data?: string; error_message?: string }>(url, {
-        params:  qp,
-        headers: {
-          'User-Agent': PC_UA,
-          'Cookie':     buildCookieHeader(sess.cookies, url),
-          'Accept':     'application/json',
+      const resp = await axios.post<{ error_code: number; data?: string; error_message?: string }>(
+        url,
+        `params=${encodeURIComponent(encBody)}`,
+        {
+          params:  commonParams(sess.imei),
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent':   PC_UA,
+            'Cookie':       buildCookieHeader(sess.cookies, url),
+          },
+          timeout: 15_000,
         },
-        timeout: 15_000,
-      });
+      );
 
       if (resp.data.error_code !== 0) {
         console.warn(`[AppApi] /api/social/group/members error [${resp.data.error_code}]: ${resp.data.error_message ?? ''}`);
