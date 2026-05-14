@@ -144,6 +144,11 @@ class CookieJar {
     }));
   }
 
+  /** Raw name/value pairs for direct PC App API calls (original zaloapp.com domain). */
+  toRawPairs(): Array<{ name: string; value: string; domain: string }> {
+    return Array.from(this.store.values()).map(c => ({ name: c.name, value: c.value, domain: c.domain }));
+  }
+
   size(): number { return this.store.size; }
 }
 
@@ -308,6 +313,18 @@ export async function triggerAppLogin(hooks: AppLoginHooks = {}): Promise<ZaloAP
     'utf8',
   );
   console.log(`[AppLogin] Credentials saved → ${config.zalo.credentialsPath}`);
+
+  // Save app-session.json with zpw_enk + raw zaloapp.com cookies for direct PC App API calls
+  const zpwEnk = String(loginData['zpw_enk'] ?? '');
+  if (zpwEnk) {
+    const appSessionPath = path.join(path.dirname(config.zalo.credentialsPath), 'app-session.json');
+    writeFileSync(
+      appSessionPath,
+      JSON.stringify({ zpw_enk: zpwEnk, imei, cookies: jar.toRawPairs() }, null, 2),
+      'utf8',
+    );
+    console.log(`[AppLogin] App session saved → ${appSessionPath}`);
+  }
 
   const zalo = new Zalo({
     logging:     false,

@@ -4,6 +4,7 @@ import path from 'path';
 import QRCode from 'qrcode';
 
 import type { ZaloAPI, ZaloMessage, ZaloMediaContent, ZaloGroupInfoResponse } from './types.js';
+import { appGetGroupMembersInfo } from './appApi.js';
 import { ZALO_MSG_TYPES } from './types.js';
 import { store } from '../store.js';
 import { tgBot } from '../telegram/bot.js';
@@ -65,7 +66,9 @@ async function populateGroupMemberCache(api: ZaloAPI, groupId: string): Promise<
     const info = await api.getGroupInfo(groupId) as {
       gridInfoMap?: Record<string, {
         memVerList?: string[];
+        currentMems?: Array<{ id: string; dName?: string; zaloName?: string }>;
         totalMember?: number;
+        hasMoreMember?: number;
       }>;
     };
     const groupData = info?.gridInfoMap?.[groupId];
@@ -74,34 +77,67 @@ async function populateGroupMemberCache(api: ZaloAPI, groupId: string): Promise<
       return;
     }
 
-    // memVerList entries are "uid_version" — extract UIDs
-    const uids = (groupData.memVerList ?? [])
+    // --- Step 1: names already embedded in currentMems (zero extra API calls) ---
+    const knownNames = new Map<string, string>();
+    for (const m of (groupData.currentMems ?? [])) {
+      const name = m.dName?.trim() || m.zaloName?.trim();
+      if (m.id && name) knownNames.set(m.id, name);
+    }
+
+    // memVerList entries are "uid_version" — extract all UIDs
+    const allUids = (groupData.memVerList ?? [])
       .map(s => s.split('_')[0])
       .filter(Boolean);
-    if (uids.length === 0) {
+
+    if (allUids.length === 0) {
       console.warn(`[Zalo] group ${groupId}: empty memVerList (totalMember=${groupData.totalMember})`);
       return;
     }
 
-    // Batch-fetch display names (getUserInfo accepts up to ~50 per call)
-    const BATCH = 50;
+    // Save immediately for members already covered by currentMems
     let saved = 0;
-    for (let i = 0; i < uids.length; i += BATCH) {
-      const batch = uids.slice(i, i + BATCH);
-      const resp = await api.getUserInfo(batch) as {
-        changed_profiles?: Record<string, { displayName?: string; zaloName?: string }>;
-        unchanged_profiles?: Record<string, unknown>;
-      };
-      const profiles = resp?.changed_profiles ?? {};
-      // unchanged_profiles also has profile data
-      const unchanged = resp?.unchanged_profiles ?? {};
-      for (const uid of batch) {
-        const p = (profiles[uid] ?? unchanged[uid]) as { displayName?: string; zaloName?: string } | undefined;
-        const name = p?.displayName?.trim() || p?.zaloName?.trim();
-        if (uid && name) { userCache.saveForGroup(uid, name, groupId); saved++; }
+    for (const uid of allUids) {
+      const name = knownNames.get(uid);
+      if (name) { userCache.saveForGroup(uid, name, groupId); saved++; }
+    }
+
+    // --- Step 2: remaining UIDs — try PC App API first, then fall back ---
+    const missingUids = allUids.filter(uid => !knownNames.has(uid));
+    if (missingUids.length > 0) {
+      // Try PC App endpoint (profile-wpa.zaloapp.com) — potentially less rate-limited
+      const appNames = await appGetGroupMembersInfo(missingUids).catch(() => null);
+      const stillMissing: string[] = [];
+
+      for (const uid of missingUids) {
+        const name = appNames?.get(uid);
+        if (name) { userCache.saveForGroup(uid, name, groupId); saved++; }
+        else stillMissing.push(uid);
+      }
+
+      // Final fallback: zca-js getUserInfo (web API)
+      if (stillMissing.length > 0) {
+        const BATCH = 50;
+        for (let i = 0; i < stillMissing.length; i += BATCH) {
+          const batch = stillMissing.slice(i, i + BATCH);
+          const resp = await api.getUserInfo(batch) as {
+            changed_profiles?: Record<string, { displayName?: string; zaloName?: string }>;
+            unchanged_profiles?: Record<string, unknown>;
+          };
+          const profiles = resp?.changed_profiles ?? {};
+          const unchanged = resp?.unchanged_profiles ?? {};
+          for (const uid of batch) {
+            const uidKey = uid.includes('_') ? uid : uid + '_0';
+            const p = (profiles[uidKey] ?? profiles[uid] ?? unchanged[uidKey] ?? unchanged[uid]) as
+              { displayName?: string; zaloName?: string } | undefined;
+            const name = p?.displayName?.trim() || p?.zaloName?.trim();
+            if (uid && name) { userCache.saveForGroup(uid, name, groupId); saved++; }
+          }
+        }
       }
     }
-    console.log(`[Zalo] Cached ${saved}/${uids.length} members for group ${groupId}`);
+
+    console.log(`[Zalo] Cached ${saved}/${allUids.length} members for group ${groupId}` +
+      (missingUids.length ? ` (currentMems: ${knownNames.size}, extra fetch: ${missingUids.length})` : ' (all from currentMems)'));
   } catch (err) {
     console.warn(`[Zalo] populateGroupMemberCache failed for ${groupId}:`, err);
   }
