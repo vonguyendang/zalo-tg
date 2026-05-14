@@ -411,13 +411,18 @@ const _memberCacheLoaded = new Set<string>();
 const _inFlightMsgIds = new Set<string>();
 
 export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
-  // Pre-populate userCache for all existing group topics on startup
-  for (const entry of store.all()) {
-    if (entry.type === 1 /* Group */) {
-      void populateGroupMemberCache(api, entry.zaloId);
-      _memberCacheLoaded.add(entry.zaloId);
-    }
+  // Pre-populate userCache for all existing group topics on startup.
+  // Stagger calls by 2 s each to avoid triggering the rate limiter (code 221).
+  const startupGroups = store.all().filter(e => e.type === 1 /* Group */);
+  for (const entry of startupGroups) {
+    _memberCacheLoaded.add(entry.zaloId);
   }
+  void (async () => {
+    for (let i = 0; i < startupGroups.length; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, 2000));
+      void populateGroupMemberCache(api, startupGroups[i].zaloId);
+    }
+  })();
 
   // Load alias list (tên danh bạ) BEFORE attaching listeners so that the first
   // message event already has aliases available for topic naming.
