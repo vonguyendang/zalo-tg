@@ -531,9 +531,10 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
         displayName = info.name || senderName;
         groupAvatarUrl = info.avt;
       } else {
-        // For DMs, zaloId is the peer's UID — resolve their real name then apply alias
+        // For DMs, zaloId is the peer's UID — resolve their real name then apply alias.
+        // Ưu tiên alias (tên danh bạ) làm tên topic; nếu không có thì dùng tên thật.
         const realName = await resolveUserDisplayName(api, zaloId, senderName);
-        displayName = aliasCache.label(zaloId, realName);
+        displayName = aliasCache.get(zaloId) ?? realName;
       }
 
       const topicId = await getOrCreateTopic(zaloId, type, displayName, groupAvatarUrl);

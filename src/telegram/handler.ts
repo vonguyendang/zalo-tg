@@ -1251,10 +1251,15 @@ export function setupTelegramHandler(
       // Topic gone — fall through to recreate
     }
 
-    // Resolve display name
+    // Resolve display name — for DMs: alias (tên danh bạ) takes priority
     let displayName: string | undefined;
     if (!isGroup) {
-      displayName = friendsCache.search('', 0).find(f => f.userId === entityId)?.displayName;
+      // Check alias first
+      displayName = aliasCache.get(entityId);
+      if (!displayName) {
+        // Fallback: friendsCache, then getUserInfo
+        displayName = friendsCache.search('', 0).find(f => f.userId === entityId)?.displayName;
+      }
       if (!displayName) {
         try {
           const resp = await currentApi?.getUserInfo(entityId) as {
