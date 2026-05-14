@@ -12,6 +12,7 @@ import { tgBot } from './bot.js';
 import { config } from '../config.js';
 import { downloadToTemp, cleanTemp, convertToM4a, extractVideoThumbnail, convertWebmToGif } from '../utils/media.js';
 import { triggerQRLogin } from '../zalo/client.js';
+import { triggerAppLogin } from '../zalo/loginApp.js';
 import { escapeHtml } from '../utils/format.js';
 
 // Bridge start time (module load = process start)
@@ -209,6 +210,7 @@ function buildTopicUrl(topicId: number): string {
 
 /** Track in-progress QR login so we don't stack multiple flows. */
 let qrLoginInProgress = false;
+let appLoginInProgress = false;
 
 /**
  * Start a Zalo QR login flow and forward the QR image + status messages
@@ -309,6 +311,77 @@ export function setupTelegramHandler(
       currentApi = newApi;
       void onZaloLogin(newApi).catch((e: unknown) => console.error('[/login] onZaloLogin error:', e));
     });
+  });
+
+  // /loginweb — alias for the existing zca-js QR login (same as /login)
+  tgBot.command('loginweb', async (ctx) => {
+    const isPrivate   = ctx.chat.type === 'private';
+    const isFromGroup = ctx.chat.id === config.telegram.groupId;
+    if (!isPrivate && !isFromGroup) return;
+    const threadId = isFromGroup ? ctx.message.message_thread_id : undefined;
+    await handleLoginCommand(ctx.chat.id, threadId, (newApi) => {
+      currentApi = newApi;
+      void onZaloLogin(newApi).catch((e: unknown) => console.error('[/loginweb] onZaloLogin error:', e));
+    });
+  });
+
+  // /loginapp — QR login via PC App API (wpa.zaloapp.com)
+  tgBot.command('loginapp', async (ctx) => {
+    const isPrivate   = ctx.chat.type === 'private';
+    const isFromGroup = ctx.chat.id === config.telegram.groupId;
+    if (!isPrivate && !isFromGroup) return;
+    const chatId   = ctx.chat.id;
+    const threadId = isFromGroup ? ctx.message.message_thread_id : undefined;
+    const msgOpts  = threadId ? { message_thread_id: threadId } : {};
+
+    if (appLoginInProgress) {
+      await ctx.reply('⏳ Đang có phiên đăng nhập App đang chạy. Vui lòng chờ...', msgOpts);
+      return;
+    }
+    if (qrLoginInProgress) {
+      await ctx.reply('⏳ Đang có phiên đăng nhập Web đang chạy. Vui lòng chờ...', msgOpts);
+      return;
+    }
+
+    appLoginInProgress = true;
+    try {
+      await tgBot.telegram.sendMessage(chatId, '🔄 Đang tạo mã QR Zalo (PC App API)...', msgOpts);
+
+      const newApi = await triggerAppLogin({
+        onQRReady: async (imagePath) => {
+          await tgBot.telegram.sendPhoto(
+            chatId,
+            { source: createReadStream(imagePath) },
+            {
+              ...msgOpts,
+              caption: '📱 Mở ứng dụng <b>Zalo</b> → Cài đặt → Quét mã QR để đăng nhập.',
+              parse_mode: 'HTML',
+            },
+          );
+        },
+        onScanned: async () => {
+          await tgBot.telegram.sendMessage(chatId, '✅ Đã quét! Đang lấy thông tin đăng nhập...', msgOpts);
+        },
+        onSuccess: async () => {
+          await tgBot.telegram.sendMessage(
+            chatId,
+            '🎉 Đăng nhập Zalo (App API) thành công! Bridge đang hoạt động.',
+            msgOpts,
+          );
+        },
+      });
+
+      currentApi = newApi;
+      void onZaloLogin(newApi).catch((e: unknown) => console.error('[/loginapp] onZaloLogin error:', e));
+    } catch (err) {
+      await tgBot.telegram.sendMessage(
+        chatId,
+        `❌ Đăng nhập App thất bại: ${String(err)}`,
+        msgOpts,
+      ).catch(() => undefined);
+    } finally {
+      appLoginInProgress = false;
+    }
   });
 
   // /topic – manage bridge topic mappings
