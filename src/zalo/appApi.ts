@@ -53,17 +53,24 @@ export function invalidateAppSession(): void {
 
 // ── Crypto (same as loginApp.ts) ──────────────────────────────────────────────
 
+function aesCipher(keyBuf: Buffer): string {
+  const bits = keyBuf.length * 8;
+  if (bits === 128) return 'aes-128-cbc';
+  if (bits === 192) return 'aes-192-cbc';
+  return 'aes-256-cbc';  // 256
+}
+
 function encodeAes(plaintext: string, zpwEnk: string): string {
   const key    = Buffer.from(zpwEnk, 'base64');
   const iv     = Buffer.alloc(16, 0);
-  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+  const cipher = crypto.createCipheriv(aesCipher(key), key, iv);
   return Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]).toString('base64');
 }
 
 function decodeAes(ciphertext: string, zpwEnk: string): string {
   const key      = Buffer.from(zpwEnk, 'base64');
   const iv       = Buffer.alloc(16, 0);
-  const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+  const decipher = crypto.createDecipheriv(aesCipher(key), key, iv);
   const ct       = Buffer.from(decodeURIComponent(ciphertext), 'base64');
   return Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8');
 }

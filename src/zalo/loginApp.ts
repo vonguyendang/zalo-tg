@@ -36,7 +36,8 @@ const PC_UA       = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, 
 function encodeAes(plaintext: string, zpwEnk: string): string {
   const key    = Buffer.from(zpwEnk, 'base64');
   const iv     = Buffer.alloc(16, 0);
-  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+  const algo   = key.length === 16 ? 'aes-128-cbc' : key.length === 24 ? 'aes-192-cbc' : 'aes-256-cbc';
+  const cipher = crypto.createCipheriv(algo, key, iv);
   // PKCS7 padding is the default for AES-CBC in Node crypto
   return Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]).toString('base64');
 }
