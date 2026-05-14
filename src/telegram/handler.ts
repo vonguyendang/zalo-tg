@@ -124,15 +124,17 @@ function resolveTgMentions(
     for (const e of entities) {
       if (e.type === 'mention') {
         const rawName = text.slice(e.offset + 1, e.offset + e.length); // strip leading @
-        const uid = zaloId
+        const uid = (zaloId
           ? userCache.resolveByNameInGroup(rawName, zaloId)
-          : userCache.resolveByName(rawName);
+          : userCache.resolveByName(rawName))
+          ?? aliasCache.resolveByAlias(rawName);
         if (uid) result.push({ pos: e.offset, uid, len: e.length });
       } else if (e.type === 'text_mention' && e.user) {
         const rawName = e.user.first_name + (e.user.last_name ? ` ${e.user.last_name}` : '');
-        const uid = zaloId
+        const uid = (zaloId
           ? userCache.resolveByNameInGroup(rawName, zaloId)
-          : userCache.resolveByName(rawName);
+          : userCache.resolveByName(rawName))
+          ?? aliasCache.resolveByAlias(rawName);
         if (uid) result.push({ pos: e.offset, uid, len: e.length });
       }
     }
@@ -151,9 +153,10 @@ function resolveTgMentions(
       const words = captured.split(' ');
       for (let end = words.length; end >= 1; end--) {
         const candidate = words.slice(0, end).join(' ');
-        const uid = zaloId
+        const uid = (zaloId
           ? userCache.resolveByNameInGroup(candidate, zaloId)
-          : userCache.resolveByName(candidate);
+          : userCache.resolveByName(candidate))
+          ?? aliasCache.resolveByAlias(candidate);
         if (uid) {
           result.push({ pos: m.index, uid, len: ('@' + candidate).length });
           break;

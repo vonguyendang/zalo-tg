@@ -426,7 +426,7 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
   }
   void (async () => {
     for (let i = 0; i < startupGroups.length; i++) {
-      if (i > 0) await new Promise(r => setTimeout(r, 2000));
+      if (i > 0) await new Promise(r => setTimeout(r, 0));
       void populateGroupMemberCache(api, startupGroups[i].zaloId);
     }
   })();
