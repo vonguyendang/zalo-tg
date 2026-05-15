@@ -802,9 +802,9 @@ export function setupTelegramHandler(
     const invites = groupInvites?.invitations ?? [];
 
     const allItems: Array<{ type: 'recv' | 'sent' | 'group', data: any }> = [
-      ...receivedReqs.map(d => ({ type: 'recv' as const, data: d })),
-      ...sentList.map(d => ({ type: 'sent' as const, data: d })),
-      ...invites.map(d => ({ type: 'group' as const, data: d })),
+      ...receivedReqs.map((d: any) => ({ type: 'recv' as const, data: d })),
+      ...sentList.map((d: any) => ({ type: 'sent' as const, data: d })),
+      ...invites.map((d: any) => ({ type: 'group' as const, data: d })),
     ];
 
     if (allItems.length === 0) {
