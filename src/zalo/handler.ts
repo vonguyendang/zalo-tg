@@ -45,11 +45,11 @@ function parseBankCardHtml(html: string): BankCardInfo | null {
 
   // p-tag order from Zalo HTML: [BIN, BankName, AccountNumber, HolderName?, ...]
   const numericTags = ptags.filter(t => /^\d+$/.test(t));
-  const textTags    = ptags.filter(t => !/^\d+$/.test(t));
+  const textTags = ptags.filter(t => !/^\d+$/.test(t));
 
   const accountNumber = numericTags.find(t => t.length !== 6) ?? numericTags[1] ?? numericTags[0] ?? '';
-  const bankName      = textTags[0] ?? '';
-  const holderName    = textTags[1]?.trim() || undefined;
+  const bankName = textTags[0] ?? '';
+  const holderName = textTags[1]?.trim() || undefined;
 
   if (!vietqr) return null;
   return { bankName, accountNumber, holderName, vietqr };
@@ -165,8 +165,8 @@ async function getCachedGroupInfo(
     const info = await api.getGroupInfo(zaloId) as ZaloGroupInfoResponse;
     const entry: GroupInfoEntry = {
       name: info?.gridInfoMap?.[zaloId]?.name ?? '',
-      avt:  info?.gridInfoMap?.[zaloId]?.avt,
-      ts:   Date.now(),
+      avt: info?.gridInfoMap?.[zaloId]?.avt,
+      ts: Date.now(),
     };
     _groupInfoCache.set(zaloId, entry);
     return entry;
@@ -340,7 +340,7 @@ async function _doCreateTopic(
   const existing = store.getTopicByZalo(zaloId, type);
   if (existing !== undefined) return existing;
 
-  const name  = topicName(displayName, type);
+  const name = topicName(displayName, type);
   const color = type === ThreadType.Group ? 0xFF93B2 : 0x6FB9F0;
 
   let topic: { message_thread_id: number };
@@ -470,9 +470,9 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
     const friends = await api.getAllFriends() as Array<{ userId: string; displayName: string }>;
     if (Array.isArray(friends) && friends.length) {
       friendsCache.set(friends.map(f => ({
-        userId:      f.userId,
+        userId: f.userId,
         displayName: f.displayName,
-        alias:       aliasCache.get(f.userId),
+        alias: aliasCache.get(f.userId),
       })));
       friendCount = friends.length;
     }
@@ -515,10 +515,10 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
         setTimeout(() => _inFlightMsgIds.delete(_primaryMsgId), 10_000);
       }
 
-      const zaloId     = msg.threadId;
-      const type       = msg.type as 0 | 1;
+      const zaloId = msg.threadId;
+      const type = msg.type as 0 | 1;
       const senderName = msg.data.dName ?? msg.data.uidFrom;
-      const msgType    = msg.data.msgType ?? ZALO_MSG_TYPES.TEXT;
+      const msgType = msg.data.msgType ?? ZALO_MSG_TYPES.TEXT;
 
       if (type === ThreadType.Group && await isMutedZaloGroup(api, zaloId)) {
         console.log(`[Zalo→TG] Skip muted group ${zaloId}`);
@@ -544,10 +544,10 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
       // Determine media URL eagerly (before topic lookup) so download starts immediately
       const _eagerMediaUrl = (() => {
         if (msgType === ZALO_MSG_TYPES.VIDEO || msgType === ZALO_MSG_TYPES.VOICE ||
-            msgType === ZALO_MSG_TYPES.GIF   || msgType === ZALO_MSG_TYPES.FILE) return media.href;
+          msgType === ZALO_MSG_TYPES.GIF || msgType === ZALO_MSG_TYPES.FILE) return media.href;
         if (msgType === ZALO_MSG_TYPES.PHOTO) {
           let u = media.href;
-          try { const p = JSON.parse(media.params ?? '{}') as { hd?: string }; if (p.hd) u = p.hd; } catch {}
+          try { const p = JSON.parse(media.params ?? '{}') as { hd?: string }; if (p.hd) u = p.hd; } catch { }
           return u;
         }
         return undefined;
@@ -616,10 +616,8 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
       if (tgReplyMsgId !== undefined) {
         tgBase.reply_parameters = { message_id: tgReplyMsgId, allow_sending_without_reply: true };
       }
-
       const caption = groupCaption(bridgeSenderName);
-      const tgOpts  = { ...tgBase, parse_mode: 'HTML' as const, caption };
-
+      const tgOpts = { ...tgBase, parse_mode: 'HTML' as const, caption };
       // Build quote data + mapping helper — saved after every successful TG send
       const zaloMsgIds = [
         msg.data.msgId,
@@ -627,19 +625,19 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
         ...(msg.data.cliMsgId && msg.data.cliMsgId !== msg.data.msgId ? [msg.data.cliMsgId] : []),
       ];
       const zaloQuoteData: ZaloQuoteData = {
-        msgId:    msg.data.msgId,
+        msgId: msg.data.msgId,
         cliMsgId: msg.data.cliMsgId ?? '',
-        uidFrom:  msg.data.uidFrom,
-        ts:       msg.data.ts,
-        msgType:  msgType,
+        uidFrom: msg.data.uidFrom,
+        ts: msg.data.ts,
+        msgType: msgType,
         // For text messages (content is a plain string), keep it as-is so zca-js
         // can send it as qmsg. For media messages (photo, video, etc.), store the
         // parsed object so prepareQMSGAttach builds a correct thumbnail reference
         // (thumb/href fields) instead of receiving a raw JSON string.
-        content:  text !== null
+        content: text !== null
           ? (msg.data.content as string)
           : (media as Record<string, unknown>),
-        ttl:      msg.data.ttl ?? 0,
+        ttl: msg.data.ttl ?? 0,
         zaloId,
         threadType: type,
       };
@@ -947,8 +945,8 @@ ${escapeHtml(photoCaption)}`
           return;
         }
         const href = media.href
-          || (typeof rawMedia['src']  === 'string' ? rawMedia['src']  : '')
-          || (typeof rawMedia['msg']  === 'string' ? rawMedia['msg']  : '')
+          || (typeof rawMedia['src'] === 'string' ? rawMedia['src'] : '')
+          || (typeof rawMedia['msg'] === 'string' ? rawMedia['msg'] : '')
           || '';
         const title = media.title
           || (typeof rawMedia['desc'] === 'string' ? rawMedia['desc'] : '')
@@ -958,7 +956,7 @@ ${escapeHtml(photoCaption)}`
           return;
         }
         const safeTitle = escapeHtml(title);
-        const linkText  = `${groupCaption(bridgeSenderName)}\n<a href="${href}">${safeTitle}</a>`;
+        const linkText = `${groupCaption(bridgeSenderName)}\n<a href="${href}">${safeTitle}</a>`;
         const sent = await tg.sendMessage(config.telegram.groupId, linkText, {
           ...tgBase,
           parse_mode: 'HTML',
@@ -975,7 +973,7 @@ ${escapeHtml(photoCaption)}`
           try {
             const parsedParams = JSON.parse(media.params) as {
               pcItem?: { data_url?: string };
-              item?:   { data_url?: string };
+              item?: { data_url?: string };
             };
             const dataUrl = parsedParams.pcItem?.data_url ?? parsedParams.item?.data_url;
             if (dataUrl) {
@@ -988,9 +986,9 @@ ${escapeHtml(photoCaption)}`
                   color: { dark: '#000000ff', light: '#ffffffff' },
                 });
                 let caption = `🏦 <b>Tài khoản ngân hàng</b>`;
-                if (info.bankName)      caption += `\nNgân hàng: <b>${info.bankName}</b>`;
+                if (info.bankName) caption += `\nNgân hàng: <b>${info.bankName}</b>`;
                 if (info.accountNumber) caption += `\nSTK: <code>${info.accountNumber}</code>`;
-                if (info.holderName)    caption += `\nChủ TK: <b>${info.holderName}</b>`;
+                if (info.holderName) caption += `\nChủ TK: <b>${info.holderName}</b>`;
                 const fullCaption = `${groupCaption(bridgeSenderName)}\n${caption}`;
                 const sent = await tg.sendPhoto(
                   config.telegram.groupId,
@@ -1024,8 +1022,8 @@ ${escapeHtml(photoCaption)}`
         const ACTION_ICONS: Record<string, string> = {
           'zinstant.bankcard': '🏦',
           'zinstant.transfer': '💸',
-          'zinstant.invoice':  '🧾',
-          'zinstant.qr':       '📷',
+          'zinstant.invoice': '🧾',
+          'zinstant.qr': '📷',
         };
         const icon = ACTION_ICONS[media.action ?? ''] ?? '📋';
         const body = `${icon} ${label}`;
@@ -1057,18 +1055,18 @@ ${escapeHtml(photoCaption)}`
             { ...tgBase } as Parameters<typeof tg.sendLocation>[3],
           );
           // Send sender name as a follow-up caption since sendLocation has no HTML caption
-            await tg.sendMessage(
-              config.telegram.groupId,
-              `${groupCaption(bridgeSenderName)}📍 Vị trí`,
-              { ...tgBase, parse_mode: 'HTML' },
-            );
+          await tg.sendMessage(
+            config.telegram.groupId,
+            `${groupCaption(bridgeSenderName)}📍 Vị trí`,
+            { ...tgBase, parse_mode: 'HTML' },
+          );
           saveTgMapping(sent);
         } else {
           // Fallback: Google Maps link
           const mapsUrl = media.href || '#';
-          const body    = `📍 <a href="${mapsUrl}">Vị trí</a>`;
-          const text    = `${groupCaption(bridgeSenderName)}\n${body}`;
-          const sent    = await tg.sendMessage(config.telegram.groupId, text, { ...tgBase, parse_mode: 'HTML' });
+          const body = `📍 <a href="${mapsUrl}">Vị trí</a>`;
+          const text = `${groupCaption(bridgeSenderName)}\n${body}`;
+          const sent = await tg.sendMessage(config.telegram.groupId, text, { ...tgBase, parse_mode: 'HTML' });
           saveTgMapping(sent);
         }
         return;
@@ -1087,10 +1085,10 @@ ${escapeHtml(photoCaption)}`
             isAnonymous?: boolean;
             action?: string;
           };
-          pollId      = p.pollId;
-          question    = p.question ?? '';
+          pollId = p.pollId;
+          question = p.question ?? '';
           isAnonymous = p.isAnonymous ?? false;
-          action      = media.action ?? '';
+          action = media.action ?? '';
         } catch { /* ignore */ }
 
         console.log(`[ZaloHandler] Poll event: action="${action}" pollId=${pollId}`);
@@ -1132,7 +1130,7 @@ ${escapeHtml(photoCaption)}`
             options.map(o => o.content),
             {
               ...tgBase,
-              is_anonymous:        isAnonymous,
+              is_anonymous: isAnonymous,
               allows_multiple_answers: pollDetail?.allow_multi_choices ?? false,
               question_parse_mode: undefined,
             } as Parameters<typeof tg.sendPoll>[3],
@@ -1148,11 +1146,11 @@ ${escapeHtml(photoCaption)}`
 
           pollStore.save({
             pollId,
-            zaloGroupId:  zaloId,
-            tgPollMsgId:  tgPollMsg.message_id,
-            tgPollUUID:   (tgPollMsg as { poll?: { id?: string } }).poll?.id ?? '',
+            zaloGroupId: zaloId,
+            tgPollMsgId: tgPollMsg.message_id,
+            tgPollUUID: (tgPollMsg as { poll?: { id?: string } }).poll?.id ?? '',
             tgScoreMsgId: tgScoreMsg.message_id,
-            tgThreadId:   topicId,
+            tgThreadId: topicId,
             options: options.map(o => ({ option_id: o.option_id, content: o.content })),
           });
           saveTgMapping(tgPollMsg);
@@ -1193,8 +1191,10 @@ ${escapeHtml(photoCaption)}`
               const newScore = await tg.sendMessage(
                 config.telegram.groupId,
                 scoreText,
-                { message_thread_id: existingEntry.tgThreadId, parse_mode: 'HTML',
-                  reply_parameters: { message_id: existingEntry.tgPollMsgId, allow_sending_without_reply: true } },
+                {
+                  message_thread_id: existingEntry.tgThreadId, parse_mode: 'HTML',
+                  reply_parameters: { message_id: existingEntry.tgPollMsgId, allow_sending_without_reply: true }
+                },
               );
               pollStore.updateScoreMsg(pollId, newScore.message_id);
             }
@@ -1269,8 +1269,8 @@ ${escapeHtml(photoCaption)}`
       // ── 13. E-card (birthday / event notification) ────────────────────────
       if (msgType === ZALO_MSG_TYPES.ECARD) {
         const ecardTitle = media.title ?? '';
-        const ecardDesc  = media.description ?? '';
-        let ecardNotify  = '';
+        const ecardDesc = media.description ?? '';
+        let ecardNotify = '';
         try {
           const p = JSON.parse(media.params ?? '{}') as { notifyTxt?: string };
           ecardNotify = p.notifyTxt ?? '';
@@ -1351,7 +1351,7 @@ ${escapeHtml(photoCaption)}`
           const tgMsgId =
             (globalId ? (msgStore.getTgMsgId(globalId) ?? sentMsgStore.getByZaloMsgId(globalId)) : undefined) ??
             (clientId ? (msgStore.getTgMsgId(clientId) ?? sentMsgStore.getByZaloMsgId(clientId)) : undefined) ??
-            (destId   ? (msgStore.getTgMsgId(destId)   ?? sentMsgStore.getByZaloMsgId(destId))   : undefined);
+            (destId ? (msgStore.getTgMsgId(destId) ?? sentMsgStore.getByZaloMsgId(destId)) : undefined);
 
           if (tgMsgId === undefined) {
             // Tin nhắn bị xoá chưa từng được bridge (gửi trước khi bridge start,
@@ -1438,7 +1438,7 @@ ${escapeHtml(photoCaption)}`
 
       // Find which topic this message belongs to
       const zaloId = undo?.threadId ?? data?.idTo;
-      const type   = (undo?.isGroup ? 1 : 0) as 0 | 1;
+      const type = (undo?.isGroup ? 1 : 0) as 0 | 1;
       const topicId = store.getTopicByZalo(String(zaloId), type);
       if (topicId === undefined) return;
 
@@ -1460,39 +1460,39 @@ ${escapeHtml(photoCaption)}`
 
   // ── Reaction (cảm xúc) ─────────────────────────────────────────────────────
   const REACTION_EMOJI: Record<string, string> = {
-    '/-heart':   '❤️',
-    '/-strong':  '👍',
-    ':>':        '😄',
-    ':o':        '😮',
-    ':-((':      '😢',
-    ':-h':       '😡',
-    ':-*':       '😘',
-    ":')":       '😂',
-    '/-shit':    '💩',
-    '/-rose':    '🌹',
-    '/-break':   '💔',
-    '/-weak':    '👎',
-    ';xx':       '🥰',
-    ';-/':       '😕',
-    ';-)':       '😉',
-    '/-fade':    '✨',
-    '/-ok':      '👌',
-    '/-v':       '✌️',
-    '/-thanks':  '🙏',
-    '/-punch':   '👊',
-    '/-no':      '🙅',
-    '/-loveu':   '🤟',
-    '--b':       '😞',
+    '/-heart': '❤️',
+    '/-strong': '👍',
+    ':>': '😄',
+    ':o': '😮',
+    ':-((': '😢',
+    ':-h': '😡',
+    ':-*': '😘',
+    ":')": '😂',
+    '/-shit': '💩',
+    '/-rose': '🌹',
+    '/-break': '💔',
+    '/-weak': '👎',
+    ';xx': '🥰',
+    ';-/': '😕',
+    ';-)': '😉',
+    '/-fade': '✨',
+    '/-ok': '👌',
+    '/-v': '✌️',
+    '/-thanks': '🙏',
+    '/-punch': '👊',
+    '/-no': '🙅',
+    '/-loveu': '🤟',
+    '--b': '😞',
     ':((': '😭',
-    'x-)':       '😎',
-    '_()_':      '🙏',
-    '/-bd':      '🎂',
-    '/-bome':    '💣',
-    '/-beer':    '🍺',
-    '/-li':      '☀️',
-    '/-share':   '🔁',
-    '/-bad':     '😤',
-    '':          '❌',  // remove reaction
+    'x-)': '😎',
+    '_()_': '🙏',
+    '/-bd': '🎂',
+    '/-bome': '💣',
+    '/-beer': '🍺',
+    '/-li': '☀️',
+    '/-share': '🔁',
+    '/-bad': '😤',
+    '': '❌',  // remove reaction
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1523,7 +1523,7 @@ ${escapeHtml(photoCaption)}`
         return;
       }
 
-      const type   = (reaction?.isGroup ? 1 : 0) as 0 | 1;
+      const type = (reaction?.isGroup ? 1 : 0) as 0 | 1;
       const topicId = store.getTopicByZalo(zaloId, type);
       if (topicId === undefined) return;
 
@@ -1582,8 +1582,8 @@ ${escapeHtml(photoCaption)}`
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   api.listener.on('group_event', async (event: any) => {
     try {
-      const type    = event?.type as string | undefined;
-      const data    = event?.data;
+      const type = event?.type as string | undefined;
+      const data = event?.data;
       const groupId = String(event?.threadId ?? data?.groupId ?? '');
       if (!groupId) return;
 
@@ -1620,12 +1620,12 @@ ${escapeHtml(photoCaption)}`
           let displayName = uid;
           try {
             const resp = await api.getUserInfo(uid) as {
-              changed_profiles?:   Record<string, { displayName?: string; zaloName?: string }>;
+              changed_profiles?: Record<string, { displayName?: string; zaloName?: string }>;
               unchanged_profiles?: Record<string, { displayName?: string; zaloName?: string }>;
             };
             const uidKey = uid.includes('_') ? uid : `${uid}_0`;
             const profile =
-              resp?.changed_profiles?.[uidKey]   ?? resp?.changed_profiles?.[uid]   ??
+              resp?.changed_profiles?.[uidKey] ?? resp?.changed_profiles?.[uid] ??
               resp?.unchanged_profiles?.[uidKey] ?? resp?.unchanged_profiles?.[uid];
             displayName = profile?.displayName?.trim() || profile?.zaloName?.trim() || uid;
           } catch { /* ignore */ }
@@ -1687,11 +1687,13 @@ ${escapeHtml(photoCaption)}`
                 const newScore = await tg.sendMessage(
                   config.telegram.groupId,
                   scoreText,
-                  { message_thread_id: entry.tgThreadId, parse_mode: 'HTML',
+                  {
+                    message_thread_id: entry.tgThreadId, parse_mode: 'HTML',
                     reply_parameters: { message_id: entry.tgPollMsgId, allow_sending_without_reply: true },
                     reply_markup: detail.closed
                       ? { inline_keyboard: [] }
-                      : { inline_keyboard: [[{ text: '🔒 Khoá bình chọn', callback_data: `lock_poll:${pollId}` }]] } },
+                      : { inline_keyboard: [[{ text: '🔒 Khoá bình chọn', callback_data: `lock_poll:${pollId}` }]] }
+                  },
                 );
                 pollStore.updateScoreMsg(pollId, newScore.message_id);
               }
@@ -1709,7 +1711,7 @@ ${escapeHtml(photoCaption)}`
       if (type === 'update' || type === 'update_setting') {
         const newName: string = (
           (data?.groupName as string | undefined) ??
-          (data?.name     as string | undefined) ??
+          (data?.name as string | undefined) ??
           ''
         ).trim();
         if (newName) {
@@ -1736,7 +1738,7 @@ ${escapeHtml(photoCaption)}`
 
       const members: Array<{ dName?: string }> = data?.updateMembers ?? [];
       const names = members.map(m => m.dName ?? '?').join(', ');
-      const actor  = data?.creatorId === data?.sourceId ? '' : '';  // unused for now
+      const actor = data?.creatorId === data?.sourceId ? '' : '';  // unused for now
       void actor;
 
       let notifText = '';
@@ -1802,7 +1804,7 @@ ${escapeHtml(photoCaption)}`
           reply_markup: {
             inline_keyboard: [[
               { text: '✅ Chấp nhận', callback_data: `fr:accept:${fromUid}` },
-              { text: '❌ Từ chối',   callback_data: `fr:reject:${fromUid}` },
+              { text: '❌ Từ chối', callback_data: `fr:reject:${fromUid}` },
             ]],
           },
         },
