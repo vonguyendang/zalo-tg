@@ -12,7 +12,7 @@ import { config } from '../config.js';
 import { downloadToTemp, cleanTemp } from '../utils/media.js';
 import { applyMentionsHtml, applyZaloMarkupHtml, formatGroupMsgHtml, formatGroupMsg, groupCaption, topicName, truncate, escapeHtml } from '../utils/format.js';
 import type { ZaloStyle } from '../utils/format.js';
-import { msgStore, userCache, pollStore, sentMsgStore, zaloAlbumStore, reactionEchoStore, reactionSummaryStore, aliasCache, type ZaloQuoteData } from '../store.js';
+import { msgStore, userCache, pollStore, sentMsgStore, zaloAlbumStore, reactionEchoStore, reactionSummaryStore, aliasCache, friendsCache, type ZaloQuoteData } from '../store.js';
 import { tgQueue } from '../utils/tgQueue.js';
 
 // Proxy that routes every tg.* call through the rate-limit queue
@@ -469,7 +469,11 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
     let friendCount = 0;
     const friends = await api.getAllFriends() as Array<{ userId: string; displayName: string }>;
     if (Array.isArray(friends) && friends.length) {
-      aliasCache.merge(friends.map(f => ({ userId: f.userId, displayName: f.displayName })));
+      friendsCache.set(friends.map(f => ({
+        userId:      f.userId,
+        displayName: f.displayName,
+        alias:       aliasCache.get(f.userId),
+      })));
       friendCount = friends.length;
     }
 
@@ -558,18 +562,20 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
 
       // Resolve display name:
       //   - Group: use group name from getGroupInfo
-      //   - DM: use the PEER's name (zaloId = peer UID), not the sender's name
+      //   - DM: use the PEER's contact-book name (zaloId = peer UID), not the raw sender dName.
       let displayName = senderName;
+      let bridgeSenderName = senderName;
       let groupAvatarUrl: string | undefined;
       if (type === ThreadType.Group) {
         const info = await getCachedGroupInfo(api, zaloId);
         displayName = info.name || senderName;
         groupAvatarUrl = info.avt;
       } else {
-        // For DMs, zaloId is the peer's UID — resolve their real name then apply alias.
-        // Ưu tiên alias (tên danh bạ) làm tên topic; nếu không có thì dùng tên thật.
+        // For DMs, zaloId is the peer's UID — resolve their real name then apply alias/contact name.
+        // Use the same contact-book name both for the topic and the message caption/header.
         const realName = await resolveUserDisplayName(api, zaloId, senderName);
         displayName = aliasCache.get(zaloId) ?? realName;
+        bridgeSenderName = displayName;
       }
 
       const topicId = await getOrCreateTopic(zaloId, type, displayName, groupAvatarUrl);
@@ -611,7 +617,7 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
         tgBase.reply_parameters = { message_id: tgReplyMsgId, allow_sending_without_reply: true };
       }
 
-      const caption = groupCaption(senderName);
+      const caption = groupCaption(bridgeSenderName);
       const tgOpts  = { ...tgBase, parse_mode: 'HTML' as const, caption };
 
       // Build quote data + mapping helper — saved after every successful TG send
@@ -681,7 +687,7 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
         const bodyHtml = (safeMentions?.length || safeStyles?.length)
           ? applyZaloMarkupHtml(safeBody, safeMentions, safeStyles)
           : escapeHtml(safeBody);
-        const tgText = formatGroupMsgHtml(senderName, bodyHtml);
+        const tgText = formatGroupMsgHtml(bridgeSenderName, bodyHtml);
         const sent = await tg.sendMessage(
           config.telegram.groupId,
           tgText,
@@ -717,7 +723,7 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
           albumKey,
           url,
           zaloMsgIds,
-          { senderName, topicId, tgBase, zaloQuote: zaloQuoteData },
+          { senderName: bridgeSenderName, topicId, tgBase, zaloQuote: zaloQuoteData },
           async (buf) => {
             if (buf.urls.length === 1) {
               // Single photo — reuse eagerly started download (likely already done)
@@ -898,7 +904,7 @@ ${escapeHtml(photoCaption)}`
             let sent: { message_id: number };
             if (isAnimated) {
               // Animated stickers are sprite sheets — send as photo with label
-              const animCaption = `${groupCaption(senderName)} <i>(sticker động 🎥)</i>`;
+              const animCaption = `${groupCaption(bridgeSenderName)} <i>(sticker động 🎥)</i>`;
               const stream = createReadStream(localPath);
               sent = await tg.sendPhoto(config.telegram.groupId, { source: stream }, {
                 ...tgBase,
@@ -952,7 +958,7 @@ ${escapeHtml(photoCaption)}`
           return;
         }
         const safeTitle = escapeHtml(title);
-        const linkText  = `${groupCaption(senderName)}\n<a href="${href}">${safeTitle}</a>`;
+        const linkText  = `${groupCaption(bridgeSenderName)}\n<a href="${href}">${safeTitle}</a>`;
         const sent = await tg.sendMessage(config.telegram.groupId, linkText, {
           ...tgBase,
           parse_mode: 'HTML',
@@ -985,7 +991,7 @@ ${escapeHtml(photoCaption)}`
                 if (info.bankName)      caption += `\nNgân hàng: <b>${info.bankName}</b>`;
                 if (info.accountNumber) caption += `\nSTK: <code>${info.accountNumber}</code>`;
                 if (info.holderName)    caption += `\nChủ TK: <b>${info.holderName}</b>`;
-                const fullCaption = `${groupCaption(senderName)}\n${caption}`;
+                const fullCaption = `${groupCaption(bridgeSenderName)}\n${caption}`;
                 const sent = await tg.sendPhoto(
                   config.telegram.groupId,
                   { source: qrBuf },
@@ -1023,7 +1029,7 @@ ${escapeHtml(photoCaption)}`
         };
         const icon = ACTION_ICONS[media.action ?? ''] ?? '📋';
         const body = `${icon} ${label}`;
-        const text = `${groupCaption(senderName)}\n${body}`;
+        const text = `${groupCaption(bridgeSenderName)}\n${body}`;
         const sent = await tg.sendMessage(config.telegram.groupId, text, {
           ...tgBase,
           parse_mode: 'HTML',
@@ -1053,7 +1059,7 @@ ${escapeHtml(photoCaption)}`
           // Send sender name as a follow-up caption since sendLocation has no HTML caption
             await tg.sendMessage(
               config.telegram.groupId,
-              `${groupCaption(senderName)}📍 Vị trí`,
+              `${groupCaption(bridgeSenderName)}📍 Vị trí`,
               { ...tgBase, parse_mode: 'HTML' },
             );
           saveTgMapping(sent);
@@ -1061,7 +1067,7 @@ ${escapeHtml(photoCaption)}`
           // Fallback: Google Maps link
           const mapsUrl = media.href || '#';
           const body    = `📍 <a href="${mapsUrl}">Vị trí</a>`;
-          const text    = `${groupCaption(senderName)}\n${body}`;
+          const text    = `${groupCaption(bridgeSenderName)}\n${body}`;
           const sent    = await tg.sendMessage(config.telegram.groupId, text, { ...tgBase, parse_mode: 'HTML' });
           saveTgMapping(sent);
         }
@@ -1109,7 +1115,7 @@ ${escapeHtml(photoCaption)}`
           if (options.length < 2) {
             // Can't create TG poll with < 2 options, send as text
             const text = type === ThreadType.Group
-              ? `${groupCaption(senderName)}📊 <b>${escapeHtml(question)}</b>\n<i>Cuộc bình chọn mới (${options.length} lựa chọn)</i>`
+              ? `${groupCaption(bridgeSenderName)}📊 <b>${escapeHtml(question)}</b>\n<i>Cuộc bình chọn mới (${options.length} lựa chọn)</i>`
               : `📊 <b>${escapeHtml(question)}</b>`;
             const sent = await tg.sendMessage(config.telegram.groupId, text, { ...tgBase, parse_mode: 'HTML' });
             saveTgMapping(sent);
@@ -1117,7 +1123,7 @@ ${escapeHtml(photoCaption)}`
           }
 
           const header = type === ThreadType.Group
-            ? `${senderName} tạo bình chọn`
+            ? `${bridgeSenderName} tạo bình chọn`
             : 'Bình chọn mới';
 
           const tgPollMsg = await tg.sendPoll(
@@ -1157,7 +1163,7 @@ ${escapeHtml(photoCaption)}`
           let updatedDetail = pollDetail;
           try { updatedDetail = await api.getPollDetail(pollId); } catch { /* use existing */ }
           const header = type === ThreadType.Group
-            ? `${senderName} vừa bình chọn`
+            ? `${bridgeSenderName} vừa bình chọn`
             : 'Cập nhật bình chọn';
           const detailOptions = updatedDetail?.options ?? [];
           const scoreText = buildScoreText(
@@ -1234,7 +1240,7 @@ ${escapeHtml(photoCaption)}`
               : media.qrCodeUrl;
 
           const body = `👤 <b>Danh thiếp</b>\nTên: <b>${escapeHtml(contactName)}</b>\nZalo ID: <code>${uid}</code>`;
-          const fullText = type === ThreadType.Group ? `${groupCaption(senderName)}\n${body}` : body;
+          const fullText = type === ThreadType.Group ? `${groupCaption(bridgeSenderName)}\n${body}` : body;
 
           if (qrUrl) {
             // Send QR code image + caption
@@ -1271,7 +1277,7 @@ ${escapeHtml(photoCaption)}`
         } catch { /* ignore */ }
 
         const lines: string[] = [];
-        if (type === ThreadType.Group) lines.push(groupCaption(senderName));
+        if (type === ThreadType.Group) lines.push(groupCaption(bridgeSenderName));
         lines.push(`🎂 <b>${escapeHtml(ecardTitle)}</b>`);
         if (ecardDesc && ecardDesc !== ecardTitle) lines.push(escapeHtml(ecardDesc));
         if (ecardNotify) lines.push(`<i>${escapeHtml(ecardNotify)}</i>`);
@@ -1381,7 +1387,7 @@ ${escapeHtml(photoCaption)}`
 
       console.log(`[ZaloHandler] Unhandled msgType="${msgType}" content:`, JSON.stringify(msg.data.content));
       const fallback = type === ThreadType.Group
-        ? `${groupCaption(senderName)}\n<i>[${msgType}]</i>`
+        ? `${groupCaption(bridgeSenderName)}\n<i>[${msgType}]</i>`
         : `<i>[${msgType}]</i>`;
       const sentFallback = await tg.sendMessage(config.telegram.groupId, fallback, {
         ...tgBase,
