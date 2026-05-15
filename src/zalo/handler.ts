@@ -254,6 +254,25 @@ async function resolveUserDisplayName(api: ZaloAPI, uid: string | undefined, fal
   return (fallback && fallback !== 'ai đó') ? fallback : (cleanUid || fallback);
 }
 
+async function maybeRenameExistingDmTopic(
+  topicId: number,
+  zaloId: string,
+  displayName: string,
+): Promise<void> {
+  const entry = store.getEntryByTopic(topicId);
+  if (!entry || entry.type !== ThreadType.User || entry.name === displayName) return;
+
+  const nextName = topicName(displayName, ThreadType.User);
+  try {
+    await tg.editForumTopic(config.telegram.groupId, topicId, { name: nextName });
+    store.updateName(topicId, displayName);
+    console.log(`[Zalo→TG] Renamed DM topic for ${zaloId}: "${entry.name}" → "${displayName}"`);
+  } catch (err) {
+    if (isTopicDeletedError(err)) throw err;
+    console.warn(`[Zalo→TG] Failed to rename DM topic ${topicId} for ${zaloId}:`, err);
+  }
+}
+
 async function getOrCreateTopic(
   zaloId: string,
   type: 0 | 1,
@@ -263,7 +282,10 @@ async function getOrCreateTopic(
 ): Promise<number> {
   if (!forceRecreate) {
     const existing = store.getTopicByZalo(zaloId, type);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined) {
+      await maybeRenameExistingDmTopic(existing, zaloId, displayName);
+      return existing;
+    }
   }
 
   const pendingKey = `${type}:${zaloId}`;
@@ -431,16 +453,29 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
     }
   })();
 
-  // Load alias list (tên danh bạ) BEFORE attaching listeners so that the first
-  // message event already has aliases available for topic naming.
+  // Load address-book names BEFORE attaching listeners so that the first
+  // message event already has names available for topic naming.
+  // getAliasList only returns explicitly set aliases (small subset), while
+  // getAllFriends returns the full contact list with displayName already using
+  // the saved contact name when present.
   try {
-    const result = await api.getAliasList() as { items?: Array<{ userId: string; alias: string }> };
-    if (result?.items?.length) {
-      aliasCache.setAll(result.items);
-      console.log(`[Zalo] Loaded ${result.items.length} aliases from address book`);
+    let aliasCount = 0;
+    const aliasResult = await api.getAliasList() as { items?: Array<{ userId: string; alias: string }> };
+    if (aliasResult?.items?.length) {
+      aliasCache.setAll(aliasResult.items);
+      aliasCount = aliasResult.items.length;
     }
+
+    let friendCount = 0;
+    const friends = await api.getAllFriends() as Array<{ userId: string; displayName: string }>;
+    if (Array.isArray(friends) && friends.length) {
+      aliasCache.merge(friends.map(f => ({ userId: f.userId, displayName: f.displayName })));
+      friendCount = friends.length;
+    }
+
+    console.log(`[Zalo] Loaded ${aliasCache.size()} contact names (${aliasCount} aliases, ${friendCount} friends)`);
   } catch (err) {
-    console.warn('[Zalo] Failed to load alias list:', err);
+    console.warn('[Zalo] Failed to load address-book names:', err);
   }
 
   api.listener.on('message', async (msg: ZaloMessage) => {
@@ -606,29 +641,46 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
         msgStore.save(sent.message_id, zaloMsgIds, zaloQuoteData);
       };
 
-      // ── 1. Plain text ──────────────────────────────────────────────────────
+      // ── 1. Plain text / rich text ─────────────────────────────────────────
       if (msgType === ZALO_MSG_TYPES.TEXT || (text !== null)) {
-        const body = text ?? (typeof msg.data.content === 'string' ? msg.data.content : '');
+        // Zalo rich-text messages still use msgType "webchat", but content is
+        // an object like { title, action: "rtf", params: "{styles:...}" }.
+        // Without using media.title here, formatted announcements silently drop.
+        const body = text
+          ?? ((typeof msg.data.content === 'string' ? msg.data.content : '')
+            || media.title
+            || '');
         if (!body.trim()) return;
         const mentions = msg.data.mentions;
 
-        // Parse Zalo text-style metadata (bold, italic, underline, strike)
-        // The server stores it as a JSON string in the `textProperties` field
-        // which is not typed in TMessage but IS present in the raw data.
+        // Parse Zalo text-style metadata (bold, italic, underline, strike).
+        // Rich text may store styles in msg.data.textProperties OR media.params.
         let styles: ZaloStyle[] | undefined;
-        try {
-          const rawProps = (msg.data as unknown as Record<string, unknown>).textProperties;
-          if (typeof rawProps === 'string' && rawProps) {
-            const parsed = JSON.parse(rawProps) as { styles?: ZaloStyle[] };
-            if (Array.isArray(parsed.styles) && parsed.styles.length > 0) {
-              styles = parsed.styles;
+        for (const rawProps of [
+          (msg.data as unknown as Record<string, unknown>).textProperties,
+          media.params,
+        ]) {
+          try {
+            if (typeof rawProps === 'string' && rawProps) {
+              const parsed = JSON.parse(rawProps) as { styles?: ZaloStyle[] };
+              if (Array.isArray(parsed.styles) && parsed.styles.length > 0) {
+                styles = parsed.styles;
+                break;
+              }
             }
-          }
-        } catch { /* ignore malformed textProperties */ }
+          } catch { /* ignore malformed style metadata */ }
+        }
 
-        const bodyHtml = (mentions?.length || styles?.length)
-          ? applyZaloMarkupHtml(truncate(body), mentions, styles)
-          : escapeHtml(truncate(body));
+        const safeBody = truncate(body);
+        const safeStyles = styles
+          ?.filter(s => s.start < safeBody.length)
+          .map(s => ({ ...s, len: Math.min(s.len, safeBody.length - s.start) }));
+        const safeMentions = mentions
+          ?.filter(m => m.pos < safeBody.length)
+          .map(m => ({ ...m, len: Math.min(m.len, safeBody.length - m.pos) }));
+        const bodyHtml = (safeMentions?.length || safeStyles?.length)
+          ? applyZaloMarkupHtml(safeBody, safeMentions, safeStyles)
+          : escapeHtml(safeBody);
         const tgText = formatGroupMsgHtml(senderName, bodyHtml);
         const sent = await tg.sendMessage(
           config.telegram.groupId,
