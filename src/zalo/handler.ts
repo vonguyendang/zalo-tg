@@ -532,7 +532,7 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
       const type       = msg.type as 0 | 1;
       const ownUid     = typeof api.getOwnId === 'function' ? String(api.getOwnId()) : undefined;
       const senderUid  = msg.isSelf && ownUid ? ownUid : msg.data.uidFrom;
-      const senderName = msg.isSelf ? 'Chuc' : (msg.data.dName ?? msg.data.uidFrom);
+      const senderName = msg.isSelf ? 'Bạn' : (msg.data.dName ?? msg.data.uidFrom);
       const msgType    = msg.data.msgType ?? ZALO_MSG_TYPES.TEXT;
 
       if (type === ThreadType.Group && await isMutedZaloGroup(api, zaloId)) {
