@@ -13,7 +13,7 @@ import { config } from '../config.js';
 import { downloadToTemp, cleanTemp, convertToM4a, extractVideoThumbnail, convertWebmToGif } from '../utils/media.js';
 import { triggerQRLogin } from '../zalo/client.js';
 import { triggerAppLogin } from '../zalo/loginApp.js';
-import { invalidateAppSession } from '../zalo/appApi.js';
+import { invalidateAppSession, appGetReceivedFriendRequests, appGetSentFriendRequests } from '../zalo/appApi.js';
 import { escapeHtml } from '../utils/format.js';
 
 // Bridge start time (module load = process start)
@@ -790,22 +790,10 @@ export function setupTelegramHandler(
     }
 
     try {
-      const [sentReqs, recvRecommends, groupInvites] = await Promise.all([
-        currentApi.getSentFriendRequest() as Promise<Record<string, {
-          zaloName: string; displayName: string; fReqInfo: { message: string; time: number };
-        }>>,
-        currentApi.getFriendRecommendations() as Promise<{
-          recommItems?: Array<{
-            recommItemType: number;
-            dataInfo: {
-              userId: string;
-              zaloName: string;
-              displayName: string;
-              recommType: number;  // 2 = ReceivedFriendRequest
-              recommInfo?: { message?: string | null };
-            };
-          }>;
-        }>,
+      // Dùng App API để lấy FULL list, fallback về Web API nếu lỗi/không có session
+      let [sentReqs, recvRecommends, groupInvites] = await Promise.all([
+        appGetSentFriendRequests(500),
+        appGetReceivedFriendRequests(500),
         currentApi.getGroupInviteBoxList({ invPerPage: 20 }) as Promise<{
           invitations: Array<{
             groupInfo: { groupId: string; name: string; totalMember: number };
@@ -816,16 +804,26 @@ export function setupTelegramHandler(
         }>,
       ]);
 
+      // Fallback về Web API nếu App API trả về rỗng (có thể do session app chết)
+      if (!sentReqs || Object.keys(sentReqs).length === 0) {
+        sentReqs = (await currentApi.getSentFriendRequest()) as any;
+      }
+      if (!recvRecommends || recvRecommends.length === 0) {
+        const webRec = await currentApi.getFriendRecommendations() as any;
+        recvRecommends = webRec?.recommItems || [];
+      }
+
       const parts: string[] = [];
       const inlineKeyboards: Array<[{ text: string; callback_data: string }]> = [];
 
-      // Lời mời kết bạn nhận được (recommType === 2)
-      const receivedReqs = (recvRecommends?.recommItems ?? [])
-        .filter(item => item.dataInfo?.recommType === 2)
-        .map(item => item.dataInfo);
+      // Lời mời kết bạn nhận được (recommType === 2 hoặc type === 2 từ App API)
+      const receivedReqs = (recvRecommends ?? [])
+        .filter((item: any) => item.dataInfo?.recommType === 2 || item.recommType === 2)
+        .map((item: any) => item.dataInfo || item);
+
       if (receivedReqs.length > 0) {
         parts.push(`📥 <b>Lời mời kết bạn nhận được (${receivedReqs.length})</b>`);
-        for (const u of receivedReqs.slice(0, 20)) {
+        for (const u of receivedReqs.slice(0, 50)) { // Tăng limit lên 50
           const name = escapeHtml(u.displayName || u.zaloName || u.userId);
           const msg  = u.recommInfo?.message ? ` — "${escapeHtml(u.recommInfo.message)}"` : '';
           parts.push(`• ${name}${msg}`);
@@ -834,19 +832,19 @@ export function setupTelegramHandler(
             callback_data: `afr:${u.userId}`,
           }]);
         }
-        if (receivedReqs.length > 20) parts.push(`  <i>... và ${receivedReqs.length - 20} người khác</i>`);
+        if (receivedReqs.length > 50) parts.push(`  <i>... và ${receivedReqs.length - 50} người khác</i>`);
       }
 
       // Lời mời kết bạn đã gửi
       const sentList = Object.values(sentReqs ?? {});
       if (sentList.length > 0) {
         parts.push(`\n📤 <b>Lời mời kết bạn đã gửi (${sentList.length})</b>`);
-        for (const u of sentList.slice(0, 10)) {
-          const name = escapeHtml(u.displayName || u.zaloName);
-          const msg  = u.fReqInfo?.message ? ` — "${escapeHtml(u.fReqInfo.message)}"` : '';
+        for (const u of sentList.slice(0, 50)) { // Tăng limit lên 50
+          const name = escapeHtml((u as any).displayName || (u as any).zaloName);
+          const msg  = (u as any).fReqInfo?.message ? ` — "${escapeHtml((u as any).fReqInfo.message)}"` : '';
           parts.push(`• ${name}${msg}`);
         }
-        if (sentList.length > 10) parts.push(`  <i>... và ${sentList.length - 10} người khác</i>`);
+        if (sentList.length > 50) parts.push(`  <i>... và ${sentList.length - 50} người khác</i>`);
       }
 
       // Lời mời tham gia nhóm
