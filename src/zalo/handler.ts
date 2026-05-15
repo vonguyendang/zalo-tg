@@ -10,7 +10,7 @@ import { store } from '../store.js';
 import { tgBot } from '../telegram/bot.js';
 import { config } from '../config.js';
 import { downloadToTemp, cleanTemp } from '../utils/media.js';
-import { applyMentionsHtml, applyZaloMarkupHtml, formatGroupMsgHtml, formatGroupMsg, groupCaption, topicName, truncate, escapeHtml } from '../utils/format.js';
+import { applyZaloMarkupHtml, formatGroupMsgHtml, formatGroupMsg, groupCaption, topicName, truncate, escapeHtml } from '../utils/format.js';
 import type { ZaloStyle } from '../utils/format.js';
 import { msgStore, userCache, pollStore, sentMsgStore, zaloAlbumStore, reactionEchoStore, reactionSummaryStore, aliasCache, friendsCache, type ZaloQuoteData } from '../store.js';
 import { tgQueue } from '../utils/tgQueue.js';
@@ -699,7 +699,19 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
           .map(s => ({ ...s, len: Math.min(s.len, safeBody.length - s.start) }));
         const safeMentions = mentions
           ?.filter(m => m.pos < safeBody.length)
-          .map(m => ({ ...m, len: Math.min(m.len, safeBody.length - m.pos) }));
+          .map(m => {
+            const len = Math.min(m.len, safeBody.length - m.pos);
+            const contactName = m.type === 0
+              ? (friendsCache.get(m.uid)?.alias?.trim()
+                || friendsCache.get(m.uid)?.displayName?.trim()
+                || aliasCache.get(m.uid)?.trim())
+              : undefined;
+            return {
+              ...m,
+              len,
+              label: contactName ? `@${contactName}` : undefined,
+            };
+          });
         const bodyHtml = (safeMentions?.length || safeStyles?.length)
           ? applyZaloMarkupHtml(safeBody, safeMentions, safeStyles)
           : escapeHtml(safeBody);
