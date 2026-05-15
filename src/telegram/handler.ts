@@ -1,4 +1,4 @@
-import { ThreadType } from 'zca-js';
+import { ThreadType, type AttachmentSource } from 'zca-js';
 import path from 'path';
 import { createReadStream } from 'fs';
 import { readFile, stat } from 'fs/promises';
@@ -1613,10 +1613,20 @@ export function setupTelegramHandler(
           // carry the quote would create visible noise in the conversation.
           const effectiveCaption = caption ?? '';
 
+          let attachmentSource: AttachmentSource[] = [localPath];
+          if (!['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4'].includes(path.extname(filename).slice(1).toLowerCase())) {
+            const fileBuffer = await readFile(localPath);
+            attachmentSource = [{
+              data: fileBuffer,
+              filename: filename as `${string}.${string}`,
+              metadata: { totalSize: fileBuffer.length },
+            }];
+          }
+
           const sendResult = await withTimeout(api.sendMessage(
             {
               msg: effectiveCaption,
-              attachments: [localPath],
+              attachments: attachmentSource,
               ...(effectiveCaption.length && zaloQuote ? { quote: zaloQuote } : {}),
               ...(captionMentions?.length ? { mentions: captionMentions } : {}),
             },
@@ -1630,7 +1640,7 @@ export function setupTelegramHandler(
               return withTimeout(api.sendMessage(
                 {
                   msg: effectiveCaption,
-                  attachments: [localPath],
+                  attachments: attachmentSource,
                   ...(captionMentions?.length ? { mentions: captionMentions } : {}),
                 },
                 zaloId,

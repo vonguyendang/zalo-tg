@@ -63,6 +63,14 @@ export const store = {
     persist(_data);
   },
 
+  /** Update the stored display name for an existing topic mapping. */
+  updateName(topicId: number, name: string): void {
+    const entry = _data.topics[String(topicId)];
+    if (!entry || entry.name === name) return;
+    entry.name = name;
+    persist(_data);
+  },
+
   /** All entries (for diagnostics). */
   all(): TopicEntry[] {
     return Object.values(_data.topics);
@@ -436,12 +444,23 @@ export const aliasCache = {
   setAll(items: Array<{ userId: string; alias: string }>): void {
     _aliasMap.clear();
     _aliasNormToUid.clear();
-    for (const { userId, alias } of items) {
-      if (alias?.trim()) {
-        _aliasMap.set(userId, alias.trim());
-        _aliasNormToUid.set(_normName(alias), userId);
+    this.merge(items);
+  },
+
+  /** Merge aliases/contact display names into the existing cache. */
+  merge(items: Array<{ userId: string; alias?: string; displayName?: string }>): void {
+    for (const { userId, alias, displayName } of items) {
+      const name = (alias ?? displayName)?.trim();
+      if (name) {
+        _aliasMap.set(userId, name);
+        _aliasNormToUid.set(_normName(name), userId);
       }
     }
+  },
+
+  /** Number of cached contact display names / aliases. */
+  size(): number {
+    return _aliasMap.size;
   },
 
   /** Find a Zalo UID by alias name (for TG→Zalo mention via alias). */
