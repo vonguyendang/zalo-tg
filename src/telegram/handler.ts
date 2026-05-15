@@ -1258,7 +1258,7 @@ export function setupTelegramHandler(
       displayName = aliasCache.get(entityId);
       if (!displayName) {
         // Fallback: friendsCache, then getUserInfo
-        displayName = friendsCache.search('', 0).find(f => f.userId === entityId)?.displayName;
+        displayName = friendsCache.get(entityId)?.displayName;
       }
       if (!displayName) {
         try {

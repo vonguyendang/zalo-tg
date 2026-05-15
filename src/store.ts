@@ -493,6 +493,13 @@ export interface ZaloFriend {
   alias?:      string;
 }
 
+function upsertAliasFromFriend(friend: ZaloFriend): void {
+  const preferredName = friend.alias?.trim() || friend.displayName?.trim();
+  if (!preferredName) return;
+  _aliasMap.set(friend.userId, preferredName);
+  _aliasNormToUid.set(_normName(preferredName), friend.userId);
+}
+
 const FRIENDS_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 let _friends:    ZaloFriend[] = [];
@@ -503,6 +510,7 @@ export const friendsCache = {
   set(list: ZaloFriend[]): void {
     _friends   = list;
     _friendsTs = Date.now();
+    for (const friend of list) upsertAliasFromFriend(friend);
   },
 
   /**
@@ -524,6 +532,10 @@ export const friendsCache = {
   /** True if the cache is still fresh. */
   isFresh(): boolean {
     return _friends.length > 0 && Date.now() - _friendsTs < FRIENDS_TTL_MS;
+  },
+
+  get(userId: string): ZaloFriend | undefined {
+    return _friends.find(f => f.userId === userId);
   },
 };
 
