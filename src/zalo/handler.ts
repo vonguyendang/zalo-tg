@@ -507,6 +507,15 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
           selfMsgIds.some(id => sentMsgStore.getByZaloMsgId(id) !== undefined)
           || sentMsgStore.isSendingTo(msg.threadId);
         if (isEcho) {
+          // The echo carries the real cliMsgId that Zalo assigned to this
+          // message. Update msgStore so that future TG→Zalo replies to this
+          // message can construct a valid quote (with a non-zero cliMsgId).
+          if (msg.data.cliMsgId) {
+            const _tgId = msgStore.getTgMsgId(msg.data.msgId);
+            if (_tgId !== undefined) {
+              msgStore.updateQuoteCliMsgId(_tgId, msg.data.cliMsgId);
+            }
+          }
           console.log(`[Zalo→TG] Skip bot echo (${selfMsgIds.join(', ')})`);
           return;
         }
@@ -546,13 +555,6 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
         void populateGroupMemberCache(api, zaloId);
       }
 
-      // Keep userCache up-to-date so TG→Zalo mention resolution works
-      if (type === ThreadType.Group) {
-        userCache.saveForGroup(senderUid, senderName, zaloId);
-      } else {
-        userCache.save(senderUid, senderName);
-      }
-
       // Parse content early so we can start media download in parallel with topic resolution
       const { text, media } = parseContent(msg.data.content);
 
@@ -579,8 +581,12 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
       //   - Group: use group name from getGroupInfo for topic, but use the sender's
       //     contact-book name in message captions/headers when available.
       //   - DM: use the PEER's contact-book name (zaloId = peer UID), not the raw sender dName.
+      // NOTE: We do NOT pass `senderName` (msg.data.dName) as fallback to
+      // resolveUserDisplayName because Zalo's dName field is unreliable — it can
+      // contain filenames or metadata (e.g. "My Documents") instead of the sender's
+      // real name. The default fallback chain (UID → 'ai đó') is safer.
       let displayName = senderName;
-      let bridgeSenderName = msg.isSelf ? senderName : await resolveUserDisplayName(api, senderUid, senderName);
+      let bridgeSenderName = msg.isSelf ? senderName : await resolveUserDisplayName(api, senderUid);
       let groupAvatarUrl: string | undefined;
       if (type === ThreadType.Group) {
         const info = await getCachedGroupInfo(api, zaloId);
@@ -589,9 +595,18 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
       } else {
         // For DMs, zaloId is the peer's UID — resolve their real name then apply alias/contact name.
         // Use the same contact-book name both for the topic and the message caption/header.
-        const realName = await resolveUserDisplayName(api, zaloId, senderName);
+        const realName = await resolveUserDisplayName(api, zaloId);
         displayName = realName;
         bridgeSenderName = displayName;
+      }
+
+      // Keep userCache up-to-date so TG→Zalo mention resolution works.
+      // Use the resolved bridgeSenderName rather than the raw senderName (dName)
+      // to avoid caching metadata-like values (e.g. "My Documents").
+      if (type === ThreadType.Group) {
+        userCache.saveForGroup(senderUid, bridgeSenderName, zaloId);
+      } else {
+        userCache.save(senderUid, bridgeSenderName);
       }
 
       const topicId = await getOrCreateTopic(zaloId, type, displayName, groupAvatarUrl);
@@ -599,26 +614,36 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
       // Resolve Telegram reply target from incoming Zalo quote (if any)
       let tgReplyMsgId: number | undefined;
       if (msg.data.quote) {
-        const globalId = String(msg.data.quote.globalMsgId);
-        // Primary: messages received from Zalo and forwarded to TG.
-        // IMPORTANT: Zalo globalMsgId is NOT unique across groups — validate the found
-        // mapping belongs to the same thread to avoid quoting a message from a different group.
-        const _candidateTg = msgStore.getTgMsgId(globalId);
-        if (_candidateTg !== undefined) {
-          const _quoteData = msgStore.getQuote(_candidateTg);
-          if (!_quoteData || _quoteData.zaloId === zaloId) {
-            tgReplyMsgId = _candidateTg;
-          } else {
-            console.warn(`[Zalo→TG] Quote globalMsgId=${globalId} maps to thread ${_quoteData.zaloId} but current thread is ${zaloId} — ignoring stale cross-group mapping`);
+        // Zalo sets globalMsgId=0 for DMs — fall back to cliMsgId in that case.
+        // Build a list of candidate IDs to try in order.
+        const _candidateIds: string[] = [];
+        const _g = msg.data.quote.globalMsgId;
+        const _c = msg.data.quote.cliMsgId;
+        if (_g && _g !== 0) _candidateIds.push(String(_g));
+        if (_c && _c !== 0) _candidateIds.push(String(_c));
+
+        for (const globalId of _candidateIds) {
+          if (tgReplyMsgId !== undefined) break;
+          // Primary: messages received from Zalo and forwarded to TG.
+          // IMPORTANT: Zalo globalMsgId is NOT unique across groups — validate the found
+          // mapping belongs to the same thread to avoid quoting a message from a different group.
+          const _candidateTg = msgStore.getTgMsgId(globalId);
+          if (_candidateTg !== undefined) {
+            const _quoteData = msgStore.getQuote(_candidateTg);
+            if (!_quoteData || _quoteData.zaloId === zaloId) {
+              tgReplyMsgId = _candidateTg;
+              break;
+            } else {
+              console.warn(`[Zalo→TG] Quote msgId=${globalId} maps to thread ${_quoteData.zaloId} but current thread is ${zaloId} — ignoring stale cross-group mapping`);
+            }
           }
-        }
-        // Fallback: messages we sent from TG to Zalo (reverse lookup), also validate thread
-        if (tgReplyMsgId === undefined) {
+          // Fallback: messages we sent from TG to Zalo (reverse lookup), also validate thread
           const _sentTg = sentMsgStore.getByZaloMsgId(globalId);
           if (_sentTg !== undefined) {
             const _sentInfo = sentMsgStore.get(_sentTg);
             if (!_sentInfo || _sentInfo.zaloId === zaloId) {
               tgReplyMsgId = _sentTg;
+              break;
             }
           }
         }

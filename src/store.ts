@@ -299,6 +299,18 @@ export const msgStore = {
   getQuote(tgMsgId: number): ZaloQuoteData | undefined {
     return _tgToQuote.get(tgMsgId);
   },
+
+  /**
+   * Update the cliMsgId on an existing quote entry.
+   * Used when the Zalo echo event provides the real cliMsgId after a TG→Zalo send.
+   */
+  updateQuoteCliMsgId(tgMsgId: number, cliMsgId: string): void {
+    const quote = _tgToQuote.get(tgMsgId);
+    if (quote) {
+      quote.cliMsgId = cliMsgId;
+      _scheduleMsgPersist();
+    }
+  },
 };
 
 // ── User cache (persisted to disk, gzip compact) ──────────────────────────────
