@@ -768,8 +768,7 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
         const albumKey = `${zaloId}:${senderUid}`;
 
         // If childnumber > 0 OR there's already a buffer for this key → album mode
-        const hasBuffer = (typeof zaloAlbumStore as unknown as { _has?: (k: string) => boolean })._has?.(albumKey);
-        void hasBuffer; // unused, we detect via the add callback
+        // (detected via the add callback which reuses or creates the buffer)
 
         zaloAlbumStore.add(
           albumKey,
