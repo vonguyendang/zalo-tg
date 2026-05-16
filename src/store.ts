@@ -266,9 +266,11 @@ function _evictOne(): void {
 {
   const saved = _loadMsgMap();
   for (const [zaloId, tgId] of saved.pairs) {
+    if (!_zaloToTg.has(zaloId)) {
+      _msgKeyOrder.push(zaloId);
+      _tgRefCount.set(tgId, (_tgRefCount.get(tgId) ?? 0) + 1);
+    }
     _zaloToTg.set(zaloId, tgId);
-    _msgKeyOrder.push(zaloId);
-    _tgRefCount.set(tgId, (_tgRefCount.get(tgId) ?? 0) + 1);
   }
   for (const [tgId, quote] of saved.quotes) {
     _tgToQuote.set(tgId, quote);
@@ -292,9 +294,9 @@ export const msgStore = {
     for (const id of validIds) {
       if (!_zaloToTg.has(id)) {
         _tgRefCount.set(tgMsgId, (_tgRefCount.get(tgMsgId) ?? 0) + 1);
+        _msgKeyOrder.push(id);
       }
       _zaloToTg.set(id, tgMsgId);
-      _msgKeyOrder.push(id);
     }
     _tgToQuote.set(tgMsgId, quote);
     _scheduleMsgPersist();
@@ -621,12 +623,30 @@ export interface SentMsgInfo {
 const _sentMap      = new Map<number, SentMsgInfo>(); // tgMsgId → info
 const _sentByZaloId = new Map<string, number>();       // String(zaloMsgId) → tgMsgId
 
+/** Insertion-order tracking for sentMap eviction (oldest first) */
+const _sentKeyOrder: number[] = [];
+const SENT_MAP_MAX = 5000;
+
 /** zaloId values currently being sent by the bot (to handle echo race condition) */
 const _pendingSendConvos = new Map<string, number>(); // zaloId → timestamp
 
 export const sentMsgStore = {
   /** Record a message we sent from TG→Zalo. tgMsgId is the user's TG message. */
   save(tgMsgId: number, info: SentMsgInfo): void {
+    // Evict oldest entry if at capacity (only count NEW tgMsgIds)
+    if (!_sentMap.has(tgMsgId)) {
+      _sentKeyOrder.push(tgMsgId);
+      while (_sentKeyOrder.length > SENT_MAP_MAX) {
+        const oldest = _sentKeyOrder.shift()!;
+        const oldInfo = _sentMap.get(oldest);
+        _sentMap.delete(oldest);
+        if (oldInfo) {
+          for (const mid of oldInfo.msgIds) {
+            _sentByZaloId.delete(String(mid));
+          }
+        }
+      }
+    }
     _sentMap.set(tgMsgId, info);
     for (const mid of info.msgIds) {
       _sentByZaloId.set(String(mid), tgMsgId);
