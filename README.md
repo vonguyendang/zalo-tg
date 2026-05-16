@@ -1,147 +1,353 @@
-*Vietnamese version: [README.vi.md](README.vi.md)*
+<div align="center">
 
+# ⚡ zalo-tg
 
-# zalo-tg
+### A production-oriented, stateful interoperability bridge between **Zalo** and **Telegram**
 
-A bidirectional message bridge between **Zalo** and **Telegram**, implemented in TypeScript on Node.js. Each Zalo conversation (direct message or group) is mapped to a dedicated Forum Topic inside a Telegram supergroup, providing full message synchronisation across both platforms.
+`zalo-tg` transforms Telegram Forum Topics into a structured operational console for Zalo conversations, while preserving message identity, media semantics, replies, reactions, recalls, mentions, polls, and long-lived conversation state.
 
----
+<br />
 
-## Table of Contents
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](#)
+[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A5_18-339933?style=for-the-badge&logo=node.js&logoColor=white)](#requirements)
+[![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot_API-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](#architecture)
+[![Zalo](https://img.shields.io/badge/Zalo-Bridge-0068FF?style=for-the-badge&logo=zalo&logoColor=white)](#zalo-authentication)
+[![License](https://img.shields.io/badge/License-Repository_File-111827?style=for-the-badge)](#license)
 
-- [Architecture](#architecture)
-- [Features](#features)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Running](#running)
-- [Authentication](#authentication)
-- [Large File Transfer](#large-file-transfer--20-mb)
-- [Bot Commands](#bot-commands)
-- [Project Structure](#project-structure)
-- [Data Files](#data-files)
-- [Security Considerations](#security-considerations)
-- [License](#license)
+<br />
 
----
+[Overview](#-system-overview) •
+[Architecture](#-architecture) •
+[Features](#-capability-surface) •
+[Installation](#-installation) •
+[Configuration](#-configuration) •
+[Commands](#-bot-command-surface) •
+[Security](#-security-model)
 
-## Architecture
+<br />
 
-The bridge operates as a single long-running Node.js process that simultaneously maintains:
+> **Vietnamese documentation:** [README.vi.md](README.vi.md)
 
-1. **A Telegram bot** (via [Telegraf](https://github.com/telegraf/telegraf)) connected to the Bot API using long polling.
-2. **A Zalo client** (via [zca-js](https://github.com/VolunteerSVD/zca-js)) connected to Zalo's internal WebSocket API.
-
-Both sides communicate through a set of in-memory and on-disk stores that maintain bidirectional mappings between Telegram message IDs and Zalo message IDs. This enables features such as reply chaining, message recall, and reaction forwarding.
-
-```
- Zalo WebSocket API
-        |
-   zalo/client.ts         (authentication, session management)
-        |
-   zalo/loginApp.ts       (PC App QR login — zaloapp.com session)
-   zalo/appApi.ts         (direct PC App API calls — separate rate-limit bucket)
-        |
-   zalo/handler.ts        (decode incoming Zalo events → Telegram)
-        |
-   store.ts               (msgStore, sentMsgStore, pollStore,
-        |                  mediaGroupStore, zaloAlbumStore,
-        |                  userCache, aliasCache, friendsCache, topicStore)
-        |
-   telegram/handler.ts    (decode incoming Telegram updates → Zalo)
-        |
-   Telegram Bot API (long polling)
-```
-
-**Topic mapping** (`data/topics.json`) is persisted to disk. All message-ID mappings are kept in memory with LRU-style eviction and are lost on process restart (graceful degradation: reply chains to old messages simply omit the `reply_parameters` field).
+</div>
 
 ---
 
-## Features
+## 📌 Table of Contents
 
-### Message Types — Zalo to Telegram
+- [System Overview](#-system-overview)
+- [Architectural Principles](#-architectural-principles)
+- [Architecture](#-architecture)
+- [Capability Surface](#-capability-surface)
+- [Message Compatibility Matrix](#-message-compatibility-matrix)
+- [Interaction Synchronisation](#-interaction-synchronisation)
+- [Poll Synchronisation](#-poll-synchronisation)
+- [Group and Topic Lifecycle](#-group-and-topic-lifecycle)
+- [Requirements](#-requirements)
+- [Installation](#-installation)
+- [Configuration](#-configuration)
+- [Running the Bridge](#-running-the-bridge)
+- [Zalo Authentication](#-zalo-authentication)
+- [Large File Transfer](#-large-file-transfer--20-mb)
+- [Bot Command Surface](#-bot-command-surface)
+- [Project Structure](#-project-structure)
+- [Persistent Data Model](#-persistent-data-model)
+- [Security Model](#-security-model)
+- [Contributors](#-contributors)
+- [License](#-license)
 
-| Zalo type (`msgType`) | Telegram output |
+---
+
+## 🧭 System Overview
+
+`zalo-tg` is a **bidirectional, state-aware synchronisation layer** that connects the Zalo messaging ecosystem with Telegram through a Telegram bot. Each Zalo conversation—either a direct message or a group conversation—is deterministically represented as an isolated **Telegram Forum Topic** inside a configured Telegram supergroup.
+
+Unlike a conventional relay bot that merely forwards text payloads, this project implements a richer interoperability model. It maintains cross-platform message correlation, reconstructs reply chains, translates media objects, mirrors selected interaction primitives, resolves mentions and aliases, and coordinates poll state between two messaging platforms with fundamentally different event models.
+
+> [!IMPORTANT]
+> `zalo-tg` is designed as an operational bridge, not a stateless message forwarder. Its correctness depends on persisted topic mappings, runtime message indexes, session material, and careful event translation across Zalo and Telegram.
+
+### High-level Behaviour
+
+| Domain | Behaviour |
 |---|---|
-| `webchat` (plain text) | `sendMessage` with HTML parse mode; mentions wrapped in `<b>` |
-| `chat.photo` | `sendPhoto` (single) or `sendMediaGroup` (album, buffered 600 ms) |
-| `chat.video.msg` | `sendVideo` |
-| `chat.gif` | `sendAnimation` |
-| `share.file` | `sendDocument` with original filename |
-| `chat.voice` | `sendVoice` |
-| `chat.sticker` | `sendSticker` (WebP); falls back to `sendPhoto` if oversized |
-| `chat.doodle` | `sendPhoto` |
-| `chat.recommended` (link) | `sendMessage` with inline link preview |
-| `chat.location.new` | `sendLocation` (native map widget) |
-| `chat.webcontent` — bank card | `sendPhoto` with VietQR image + account details |
-| `chat.webcontent` — generic | `sendMessage` with icon and label |
-| contact card (contactUid) | `sendPhoto` with QR code + name/ID, or `sendMessage` fallback |
-| `group.poll` — create | `sendPoll` + editable score message with lock button |
-| `group.poll` — vote update | Edit score message with updated vote counts and bar chart |
-
-### Message Types — Telegram to Zalo
-
-| Telegram content | Zalo API call |
-|---|---|
-| Text | `sendMessage` |
-| Photo (single) | `sendMessage` with attachment |
-| Photo album (media group) | `sendMessage` with multiple attachments (buffered 500 ms) |
-| Video (single) | `sendMessage` with attachment |
-| Video album (media group) | `sendMessage` with multiple attachments (buffered 500 ms) |
-| Animation / GIF | `sendMessage` with attachment |
-| Document | `sendMessage` with attachment |
-| Voice note (OGG Opus) | Convert to M4A via ffmpeg → `uploadAttachment` → `sendVoice` |
-| Sticker (static WebP) | `sendMessage` with attachment |
-| Sticker (animated / video) | Downloads JPEG thumbnail → `sendMessage` with attachment |
-| Location | `sendLink` with Google Maps URL; fallback to `sendMessage` |
-| Contact | `sendMessage` with name and phone number |
-| Poll | `createPoll` on Zalo + bot-owned non-anonymous clone poll on Telegram |
-
-### Interaction Sync
-
-**Reply chain** — When a Telegram message has `reply_to_message`, the bridge resolves the target to a Zalo `quote` object and passes it to `sendMessage`. Replies to messages originally sent from Telegram to Zalo are resolved via a reverse index in `sentMsgStore`.
-
-**Reactions** — Telegram `message_reaction` updates are mapped through a static emoji table and forwarded via `addReaction`. Zalo reactions are forwarded as a short text reply on Telegram.
-
-**Message recall (undo)** — Zalo `undo` events trigger `deleteMessage` on the mirrored Telegram message. The `/recall` command triggers `api.undo` for messages the bot itself sent.
-
-**Mentions** — Zalo `@mention` spans are wrapped in `<b>` tags on Telegram. Telegram `@username` entities and plain-text `@Name` patterns are resolved to Zalo UIDs via `userCache` and forwarded as `mentions` in `sendMessage`. **Aliases** (contact nicknames set in Zalo's address book) are also accepted as mention targets — `@Alias` resolves to the correct UID even when the display name is different. Captions on photos, videos, and documents are also mention-resolved.
-
-### Poll Synchronisation
-
-- Zalo poll creation → Telegram native poll + editable score message with inline lock button.
-- Telegram poll creation → Zalo `createPoll` + bot-owned non-anonymous clone poll (required for `poll_answer` updates) + editable score message.
-- `poll_answer` events (Telegram side) → `votePoll` on Zalo + immediate score refresh via `getPollDetail`.
-- Zalo votes trigger `group_event` with `boardType=3` → `getPollDetail` → score message edit.
-- Lock button / `stopPoll` → `lockPoll` on Zalo, `stopPoll` on both TG polls, score message updated to show closed state.
-
-### Group Management
-
-- New Zalo group conversation → Forum Topic created automatically on first message received, with the group avatar fetched and pinned as the first message.
-- Group events (join, leave, remove, block) forwarded as italic system messages inside the topic.
+| Conversation mapping | Each Zalo thread maps to one Telegram Forum Topic. |
+| Inbound Zalo events | Zalo messages are decoded, normalised, enriched, then emitted to Telegram. |
+| Inbound Telegram updates | Telegram messages are interpreted, transformed, uploaded, then delivered to Zalo. |
+| Message identity | Zalo and Telegram message identifiers are indexed bidirectionally. |
+| Context preservation | Replies, recalls, reactions, mentions, media albums, and poll updates are reconstructed when enough metadata is available. |
+| Failure posture | Missing historical mappings degrade gracefully instead of breaking the forwarding pipeline. |
 
 ---
 
-## Requirements
+## 🧠 Architectural Principles
 
-| Dependency | Version | Notes |
+`zalo-tg` is built around a few core engineering principles:
+
+<table>
+<tr>
+<td width="33%">
+
+### 🧩 Semantic Preservation
+
+The bridge attempts to preserve the *meaning* of messages, not only their raw textual content. Attachments, replies, mentions, reactions, locations, contacts, and polls are translated into the closest platform-native representation.
+
+</td>
+<td width="33%">
+
+### 🔁 Bidirectional Correlation
+
+Every supported event direction maintains a correlation layer between Zalo message identifiers and Telegram message identifiers, enabling reply resolution, recall propagation, and contextual reconstruction.
+
+</td>
+<td width="33%">
+
+### 🛡️ Graceful Degradation
+
+When a mapping, media object, quote target, or metadata fragment cannot be resolved, the system continues forwarding the message while omitting only the unavailable semantic layer.
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🏗️ Architecture
+
+The bridge executes as a single long-lived **Node.js** process. It maintains two concurrently active client layers:
+
+1. A **Telegram Bot API client**, implemented with [`Telegraf`](https://github.com/telegraf/telegraf), using long polling.
+2. A **Zalo client**, implemented with [`zca-js`](https://github.com/RFS-ADRENO/zca-js), connected to Zalo's internal WebSocket interface.
+
+Both clients communicate through shared runtime stores and persisted metadata. These stores act as the correlation substrate required to translate stateful message semantics between the two platforms.
+
+```mermaid
+flowchart LR
+    ZALO["Zalo WebSocket API"]
+    ZClient["src/zalo/client.ts<br/>Session lifecycle<br/>Web API login"]
+    LoginApp["src/zalo/loginApp.ts<br/>PC App QR login"]
+    AppApi["src/zalo/appApi.ts<br/>PC App API<br/>Rate-limit isolation"]
+    ZHandler["src/zalo/handler.ts<br/>Zalo event decoder"]
+    Store[("src/store.ts<br/>Runtime + persistent state")]
+    THandler["src/telegram/handler.ts<br/>Telegram update decoder"]
+    TBot["Telegram Bot API<br/>Long polling"]
+
+    ZALO --> ZClient
+    ZClient --> LoginApp
+    ZClient --> AppApi
+    ZClient --> ZHandler
+    ZHandler --> Store
+    Store --> THandler
+    THandler --> TBot
+    TBot --> THandler
+    THandler --> Store
+    Store --> ZHandler
+    ZHandler --> ZClient
+```
+
+### Runtime State Plane
+
+```mermaid
+flowchart TB
+    Store["Central Store"]
+    Topic["topicStore<br/>Zalo conversation ↔ Telegram topic"]
+    Msg["msgStore<br/>Zalo message ↔ Telegram message"]
+    Sent["sentMsgStore<br/>Telegram-originated reverse index"]
+    Poll["pollStore<br/>Poll metadata + score message"]
+    Media["mediaGroupStore<br/>Telegram album buffer"]
+    Album["zaloAlbumStore<br/>Zalo album buffer"]
+    User["userCache<br/>UID/display-name lookup"]
+    Alias["aliasCache<br/>Local nickname resolution"]
+    Friends["friendsCache<br/>5-minute friends TTL"]
+
+    Store --> Topic
+    Store --> Msg
+    Store --> Sent
+    Store --> Poll
+    Store --> Media
+    Store --> Album
+    Store --> User
+    Store --> Alias
+    Store --> Friends
+```
+
+### State Model
+
+The topic mapping is persisted in `data/topics.json`, ensuring that known Zalo conversations remain attached to stable Telegram Forum Topics across process restarts.
+
+Message-ID mappings are primarily maintained in memory with LRU-style eviction. A compressed persisted mapping file, `data/msg-map.json`, allows reply-chain resolution to survive restarts. If a historical mapping is unavailable, the system deliberately degrades by omitting Telegram `reply_parameters` or Zalo quote metadata rather than failing the forwarding operation.
+
+---
+
+## ✨ Capability Surface
+
+| Capability | Status | Technical Notes |
+|---|:---:|---|
+| Bidirectional message forwarding | ✅ | Zalo ⇄ Telegram event projection. |
+| Forum Topic provisioning | ✅ | Automatic topic creation per Zalo conversation. |
+| Rich media forwarding | ✅ | Photos, albums, videos, GIFs, files, stickers, voice notes, contacts, locations, and selected web content. |
+| Reply-chain preservation | ✅ | Requires available message correlation metadata. |
+| Reaction propagation | ✅ | Emoji compatibility mapping and contextual fallback messages. |
+| Message recall | ✅ | Zalo undo → Telegram deletion; Telegram `/recall` → Zalo undo. |
+| Poll synchronisation | ✅ | Native polls, score messages, vote propagation, and lock handling. |
+| Mention resolution | ✅ | Display names, Telegram usernames, Zalo UIDs, and aliases. |
+| Rate-limit mitigation | ✅ | Optional PC App API session for selected lookup paths. |
+| Large file transfer | ✅ | Optional local Telegram Bot API server, up to 2 GB. |
+
+---
+
+## 🧾 Message Compatibility Matrix
+
+### Zalo → Telegram
+
+| Zalo message type | Telegram representation | Notes |
 |---|---|---|
-| Node.js | >= 18 | ESM support required |
-| npm | >= 9 | |
-| ffmpeg | any | Must be in `PATH`; used for OGG→M4A voice conversion |
-| Telegram Bot | — | Created via [@BotFather](https://t.me/BotFather) |
-| Telegram Supergroup | — | Forum (Topics) mode enabled; bot must be admin |
-| Zalo account | — | Active account; session stored in `credentials.json` |
+| `webchat` | `sendMessage` | HTML parse mode; Zalo mentions are rendered safely. |
+| `chat.photo` | `sendPhoto` / `sendMediaGroup` | Albums are buffered for 600 ms before emission. |
+| `chat.video.msg` | `sendVideo` | Preserves native video representation. |
+| `chat.gif` | `sendAnimation` | Uses Telegram animation semantics. |
+| `share.file` | `sendDocument` | Retains the original filename. |
+| `chat.voice` | `sendVoice` | Preserves voice-note UX. |
+| `chat.sticker` | `sendSticker` / `sendPhoto` | WebP sticker path with photo fallback for oversized assets. |
+| `chat.doodle` | `sendPhoto` | Rendered as an image asset. |
+| `chat.recommended` | `sendMessage` | Inline link preview. |
+| `chat.location.new` | `sendLocation` | Telegram native map widget. |
+| `chat.webcontent` — bank card | `sendPhoto` | VietQR image plus account metadata. |
+| `chat.webcontent` — generic | `sendMessage` | Icon and label metadata. |
+| Contact card | `sendPhoto` / text fallback | QR code, name, and ID when available. |
+| `group.poll` — create | `sendPoll` + score message | Includes editable score message and inline lock control. |
+| `group.poll` — vote update | Score-message edit | Updated counts with compact bar visualization. |
 
-**Required bot admin permissions in the Telegram supergroup:**
-- Manage topics (create, edit)
-- Delete messages
-- Pin messages
-- Manage the group (for reactions via `message_reaction` updates)
+### Telegram → Zalo
+
+| Telegram content | Zalo operation | Notes |
+|---|---|---|
+| Text | `sendMessage` | Includes mention-resolution pipeline. |
+| Single photo | `sendMessage` with image attachment | Caption participates in mention resolution. |
+| Photo album | `sendMessage` with multiple attachments | Albums are buffered for 500 ms. |
+| Single video | `sendMessage` with video attachment | Native attachment upload. |
+| Video album | `sendMessage` with multiple attachments | Buffered media-group handling. |
+| Animation / GIF | `sendMessage` with attachment | Download and upload pipeline. |
+| Document | `sendMessage` with attachment | Preserves document payload. |
+| Voice note | `sendVoice` | Converts OGG Opus to M4A through `ffmpeg`. |
+| Static WebP sticker | `sendMessage` with attachment | Static sticker forwarding. |
+| Animated/video sticker | Thumbnail attachment | JPEG thumbnail fallback. |
+| Location | `sendLink` / `sendMessage` fallback | Google Maps URL bridge. |
+| Contact | `sendMessage` | Name and phone number serialization. |
+| Poll | `createPoll` | Also creates a bot-owned non-anonymous Telegram clone poll for vote tracking. |
 
 ---
 
-## Installation
+## 🔄 Interaction Synchronisation
+
+### Reply Chains
+
+When a Telegram message replies to another Telegram message, the bridge attempts to resolve the target message back to a Zalo-compatible quote object. That quote metadata is then passed to `sendMessage`, allowing the forwarded Zalo message to retain conversational context.
+
+For messages originally sent from Telegram to Zalo, the reverse lookup is performed through `sentMsgStore`, ensuring that replies remain coherent even when the original message did not originate from Zalo.
+
+```mermaid
+sequenceDiagram
+    participant TG as Telegram Topic
+    participant Store as Mapping Store
+    participant Bridge as zalo-tg
+    participant Zalo as Zalo Conversation
+
+    TG->>Bridge: Reply message update
+    Bridge->>Store: Resolve reply target
+    alt Mapping exists
+        Store-->>Bridge: Zalo quote metadata
+        Bridge->>Zalo: sendMessage(text, quote)
+    else Mapping missing
+        Store-->>Bridge: No historical mapping
+        Bridge->>Zalo: sendMessage(text)
+    end
+```
+
+### Reactions
+
+Telegram `message_reaction` updates are mapped through a static emoji compatibility table and forwarded to Zalo with `addReaction`. In the opposite direction, Zalo reactions are represented in Telegram as concise contextual replies so that reaction activity remains visible even when Telegram lacks a one-to-one representation for the source event.
+
+### Message Recall
+
+Zalo `undo` events are mirrored by deleting the corresponding Telegram message when a mapping exists. On the Telegram side, the `/recall` command invokes `api.undo` for messages previously sent by the bot into Zalo.
+
+### Mentions and Aliases
+
+Zalo `@mention` spans are rendered on Telegram with safe HTML formatting. Telegram `@username` entities and plain-text `@Name` patterns are resolved to Zalo UIDs through `userCache`.
+
+The bridge also supports Zalo contact aliases. If a Zalo user has a local nickname configured in the address book, `@Alias` can resolve to the correct UID even when the visible display name differs. Captions attached to photos, videos, and documents participate in the same mention-resolution pipeline.
+
+---
+
+## 🗳️ Poll Synchronisation
+
+Poll synchronisation is implemented as a coordinated state machine rather than a naive forwarding rule. This is necessary because Zalo and Telegram expose materially different poll models, authoring constraints, and vote-update events.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Created
+    Created --> Mirrored: Create native counterpart
+    Mirrored --> Voting: Receive vote event
+    Voting --> Refreshing: Fetch authoritative poll detail
+    Refreshing --> Mirrored: Edit score message
+    Mirrored --> Locked: Close / lock poll
+    Locked --> Finalized: Stop poll + final score update
+    Finalized --> [*]
+```
+
+Supported flows:
+
+| Flow | Implementation |
+|---|---|
+| Zalo poll creation → Telegram | Creates a native Telegram poll and an editable score message. |
+| Telegram poll creation → Zalo | Calls Zalo `createPoll` and creates a bot-owned Telegram clone poll. |
+| Telegram `poll_answer` → Zalo | Calls Zalo `votePoll`, then refreshes score state through `getPollDetail`. |
+| Zalo vote event → Telegram | Handles `group_event` with `boardType=3`, then edits the score message. |
+| Poll closure | Calls Zalo `lockPoll`, Telegram `stopPoll`, and final score-message update. |
+
+> [!NOTE]
+> The bot-owned clone poll is required because Telegram only emits `poll_answer` updates for polls created by the bot itself. This design preserves vote visibility while keeping the user-facing interface native to Telegram.
+
+---
+
+## 🧵 Group and Topic Lifecycle
+
+When the bridge observes a new Zalo group conversation, it automatically creates a dedicated Telegram Forum Topic for that conversation. If a group avatar is available, the avatar is fetched and pinned as the first topic message, making the topic immediately recognisable.
+
+Group lifecycle events—joins, leaves, removals, blocks, and selected administrative updates—are forwarded as italicised system messages inside the corresponding Telegram topic.
+
+```mermaid
+flowchart LR
+    A["Observe unknown Zalo group"] --> B["Create Telegram Forum Topic"]
+    B --> C["Persist mapping in data/topics.json"]
+    C --> D["Fetch group avatar if available"]
+    D --> E["Pin avatar / identity message"]
+    E --> F["Forward future group events into topic"]
+```
+
+---
+
+## 📦 Requirements
+
+| Dependency | Required Version | Purpose |
+|---|---:|---|
+| Node.js | `>= 18` | Runtime with native ESM support. |
+| npm | `>= 9` | Dependency installation and script execution. |
+| ffmpeg | Recent version | OGG Opus → M4A conversion for Telegram voice notes. |
+| Telegram Bot | — | Created through [@BotFather](https://t.me/BotFather). |
+| Telegram Supergroup | — | Forum Topics must be enabled. |
+| Zalo account | — | Active account with persisted session material. |
+
+### Required Telegram Administrator Permissions
+
+- Manage topics.
+- Delete messages.
+- Pin messages.
+- Manage the group, including reaction-related update access.
+
+---
+
+## 🚀 Installation
 
 ```bash
 git clone https://github.com/williamcachamwri/zalo-tg
@@ -150,98 +356,146 @@ npm install
 cp .env.example .env
 ```
 
+After installing dependencies, configure the environment variables in `.env` before starting the bridge.
+
 ---
 
-## Configuration
+## ⚙️ Configuration
 
-Edit `.env`:
+Edit `.env` with the required runtime configuration:
 
 ```env
-# Telegram Bot token from @BotFather
+# Telegram Bot token obtained from @BotFather
 TG_TOKEN=123456789:AAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
-# Telegram supergroup ID (negative integer, e.g. -1001234567890)
+# Telegram supergroup ID. This is a negative integer, for example: -1001234567890
 TG_GROUP_ID=-1001234567890
 
-# Directory for persistent data (topics.json, credentials.json)
-# Defaults to ./data if omitted
+# Directory for persistent bridge state. Defaults to ./data when omitted.
 DATA_DIR=./data
 
-# Skip forwarding messages from muted Zalo groups
-# Defaults to false; set to true/1/yes/on to enable
+# Skip forwarding messages from muted Zalo groups.
+# Accepted truthy values: true, 1, yes, on
 ZALO_SKIP_MUTED_GROUPS=false
 ```
 
+### Configuration Reference
+
+| Variable | Required | Default | Description |
+|---|:---:|---|---|
+| `TG_TOKEN` | ✅ | — | Telegram bot token issued by BotFather. |
+| `TG_GROUP_ID` | ✅ | — | Target Telegram supergroup ID with Forum Topics enabled. |
+| `DATA_DIR` | ❌ | `./data` | Directory used for persistent bridge state. |
+| `ZALO_SKIP_MUTED_GROUPS` | ❌ | `false` | Skips forwarding from muted Zalo groups when enabled. |
+| `LOCAL_BOT_API` | ❌ | `0` | Enables local Telegram Bot API mode when set to `1`. |
+| `TG_LOCAL_SERVER` | Conditional | — | Local Bot API base URL. |
+| `TG_API_ID` | Conditional | — | Telegram application API ID for local Bot API setup. |
+| `TG_API_HASH` | Conditional | — | Telegram application API hash for local Bot API setup. |
+
 ---
 
-## Running
+## ▶️ Running the Bridge
+
+### Development Mode
 
 ```bash
-# Development — hot reload via tsx watch
 npm run dev
+```
 
-# Production
+Development mode uses `tsx watch`, enabling hot reload during local iteration.
+
+### Production Mode
+
+```bash
 npm run build
 npm start
 ```
 
+Production mode compiles the TypeScript source before starting the Node.js process.
+
+### Recommended Runtime Checklist
+
+- [ ] `.env` is configured.
+- [ ] Telegram bot is added to the target supergroup.
+- [ ] Forum Topics are enabled in the supergroup.
+- [ ] Bot has the required administrator permissions.
+- [ ] Zalo session has been created through `/loginweb` or `/login`.
+- [ ] Optional PC App session has been created through `/loginapp`.
+- [ ] `ffmpeg` is available in `PATH` if voice-note bridging is required.
+
 ---
 
-## Authentication
+## 🔐 Zalo Authentication
 
-The bridge supports two independent Zalo login methods. Either can be used at any time via the corresponding bot command.
+The bridge supports two independent Zalo authentication mechanisms. Either flow can be initiated from the configured Telegram group through bot commands.
 
-### `/loginweb` — Web API (default)
+### `/loginweb` — Web API Session
 
-Uses the standard zca-js Web API session. This is the same flow as the original `/login` command.
+`/loginweb` creates a standard `zca-js` Web API session. This is equivalent to the legacy `/login` command.
 
-1. Send `/loginweb` in any topic of the bridged group.
+**Procedure**
+
+1. Send `/loginweb` in any topic of the bridged Telegram group.
 2. The bot replies with a Zalo QR code image.
-3. Scan it with the Zalo mobile app under **Settings → QR Code Login**.
-4. The session is saved to `data/credentials.json`.
+3. Scan the QR code in the Zalo mobile app through **Settings → QR Code Login**.
+4. The session is persisted to `data/credentials.json`.
 
-**Rate limits:** The Web API has per-endpoint rate limits (HTTP 221). Hitting them during startup with many groups is mitigated by the PC App fallback described below.
+> [!WARNING]
+> The Web API is subject to endpoint-level rate limits. During startup with many groups, HTTP `221` rate-limit responses may occur. The PC App session provides a separate lookup path for selected operations.
 
-### `/loginapp` — PC App API
+### `/loginapp` — PC App API Session
 
-Uses the Zalo PC App session (`wpa.zaloapp.com` / `zaloapp.com` cookie domain). This session is stored separately and used for group-member lookups with a **different rate-limit bucket** from the Web API.
+`/loginapp` creates a Zalo PC App session using the `wpa.zaloapp.com` and `zaloapp.com` cookie domains. This session is stored independently from the Web API session and is primarily used for group-member lookup operations.
 
-1. Send `/loginapp` in any topic of the bridged group.
-2. The bot replies with a Zalo QR code (same visual appearance).
-3. Scan it with the Zalo mobile app — Zalo treats it as a PC App login.
-4. The session is saved to `data/app-session.json` (contains `zpw_enk`, `imei`, and `zaloapp.com` cookies).
+**Procedure**
 
-**Why use `/loginapp`:**
-- `populateGroupMemberCache` at startup calls `group-wpa.zaloapp.com` (PC App domain) instead of the Web API, avoiding rate-limit errors (code 221) that occur when many groups are processed simultaneously.
-- The member-name lookup (`profile-wpa.zaloapp.com/api/social/group/members`) also uses this session.
-- If no `app-session.json` exists, the bridge falls back gracefully to the Web API for all operations.
+1. Send `/loginapp` in any topic of the bridged Telegram group.
+2. The bot replies with a Zalo QR code.
+3. Scan the QR code in the Zalo mobile app. Zalo treats this as a PC App login.
+4. The session is persisted to `data/app-session.json`.
 
-### Member Cache Population (3-tier)
+The stored session includes:
 
-When a group is first seen, `populateGroupMemberCache` resolves display names with this priority:
+| Field | Description |
+|---|---|
+| `zpw_enk` | Base64-encoded AES session encryption key. |
+| `imei` | Device identifier. |
+| `cookies` | Raw `zaloapp.com` cookie array. |
 
-| Tier | Source | Extra API call? |
-|---|---|---|
-| 1 | `currentMems` embedded in `getGroupInfo` response | No |
-| 2 | `profile-wpa.zaloapp.com/api/social/group/members` (PC App) | Yes — different rate bucket |
-| 3 | `getUserInfo` Web API | Yes — rate-limited |
+### Why the PC App Session Matters
 
-Tiers 2 and 3 are only called for UIDs not covered by tier 1 (typically none for groups under ~200 members).
+The PC App session allows `populateGroupMemberCache` to query `group-wpa.zaloapp.com` instead of relying exclusively on the Web API. This places member lookup traffic into a different rate-limit bucket and substantially reduces startup failure probability when many groups must be indexed.
+
+The same session is also used by member-name lookups through `profile-wpa.zaloapp.com/api/social/group/members`. If no PC App session is available, the bridge falls back to the Web API automatically.
+
+### Member Cache Population Strategy
+
+| Tier | Source | Additional API Call | Operational Cost |
+|---:|---|:---:|---|
+| 1 | `currentMems` embedded in `getGroupInfo` | No | Lowest |
+| 2 | `profile-wpa.zaloapp.com/api/social/group/members` through PC App API | Yes | Isolated rate-limit bucket |
+| 3 | `getUserInfo` through Web API | Yes | Rate-limited fallback |
+
+Tiers 2 and 3 are only used for UIDs not already resolved by tier 1, which is typically sufficient for groups below approximately 200 members.
 
 ---
 
-## Large File Transfer (> 20 MB)
+## 📁 Large File Transfer &gt; 20 MB
 
-By default, the official Telegram Bot API restricts file downloads to **20 MB**. To transfer larger files (up to **2 GB**), you can optionally run a **local Telegram Bot API server** on your machine.
+The official Telegram Bot API imposes restrictive file-size limits for bot downloads and uploads. To support larger transfers—up to **2 GB**—`zalo-tg` can optionally operate against a **local Telegram Bot API server**.
 
 ### Quick Start
 
-1. **Build or download the server** (see [Local Bot API Setup Guide](LOCAL_BOT_API_SETUP.md))
-2. **One-time logout** from official API:
+1. Build or download the local Telegram Bot API server. See [Local Bot API Setup Guide](LOCAL_BOT_API_SETUP.md).
+
+2. Log the bot out of the official Telegram Bot API once:
+
    ```bash
    curl "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/logOut"
    ```
-3. **Start the local server**:
+
+3. Start the local Bot API server:
+
    ```bash
    telegram-bot-api \
      --api-id=<YOUR_API_ID> \
@@ -250,210 +504,238 @@ By default, the official Telegram Bot API restricts file downloads to **20 MB**.
      --dir=~/zalo-tg-bot-api/data \
      --http-port=8081
    ```
-4. **Update `.env`**:
+
+4. Enable local mode in `.env`:
+
    ```env
-   # Enable local server mode (1 = use local server, 0 = use official API)
    LOCAL_BOT_API=1
-
-   # URL of your local server
    TG_LOCAL_SERVER=http://localhost:8081
-
-   # Your Telegram App credentials (from https://my.telegram.org/apps)
    TG_API_ID=your_api_id
    TG_API_HASH=your_api_hash
    ```
-5. **Restart the bridge**:
+
+5. Rebuild and restart the bridge:
+
    ```bash
    npm run build
    npm start
    ```
 
-### `LOCAL_BOT_API` Flag — Detailed Explanation
+### `LOCAL_BOT_API` Behaviour
 
-This flag is the **master switch** that controls whether the bridge uses the local server or the official Telegram API.
-
-| Value | Behavior |
+| Value | Behaviour |
 |---|---|
-| `LOCAL_BOT_API=1` | Use local server at `TG_LOCAL_SERVER`. File limit: **2 GB**. |
-| `LOCAL_BOT_API=0` | Use official `api.telegram.org`. File limit: **50 MB** download / **20 MB** upload. |
+| `LOCAL_BOT_API=1` | Uses the local server configured by `TG_LOCAL_SERVER`. File transfers can reach up to **2 GB**. |
+| `LOCAL_BOT_API=0` | Uses the official `api.telegram.org` endpoint. File limits follow official Bot API constraints. |
 
-**Why this matters:**
+Important operational details:
 
-- When `LOCAL_BOT_API=1`, the bot connects to your local server (`localhost:8081` by default). The local server handles all Telegram traffic including file uploads/downloads with the 2 GB limit.
-- When `LOCAL_BOT_API=0` (or the flag is missing), the bot uses the standard official Telegram API. `TG_LOCAL_SERVER` is **ignored** even if set.
-- **Switching modes requires a bot logout/login cycle.** If you previously used the local server and switch back to `LOCAL_BOT_API=0`, you must first log the bot back into the official API:
-  ```bash
-  # While local server is still running, log back into official API:
-  curl "http://localhost:8081/bot<YOUR_BOT_TOKEN>/logOut"
-  # Then stop the local server and set LOCAL_BOT_API=0
-  ```
-- **File ID compatibility:** `file_id` values are different between the local server and the official API. Files sent when using one mode cannot be downloaded when the bot is switched to the other mode. The bridge handles this gracefully by automatically falling back to the official API to resolve old `file_id`s when running in local mode.
-- **VPS deployment:** If your VPS does not have the local Bot API server installed, simply set `LOCAL_BOT_API=0`. No other changes needed — `TG_LOCAL_SERVER` and `TG_API_ID`/`TG_API_HASH` are ignored.
-- **Upload timeout** is dynamically calculated based on file size (minimum 30s, ~1 MB/s minimum throughput, capped at 10 minutes) to handle large files reliably.
+- When local mode is enabled, all Telegram Bot API traffic is routed through the configured local server.
+- When local mode is disabled or omitted, `TG_LOCAL_SERVER`, `TG_API_ID`, and `TG_API_HASH` are ignored.
+- Switching between official and local modes requires a logout/login cycle.
+- `file_id` values are not portable between official and local Bot API modes.
+- Upload timeouts are computed dynamically from file size, with a 30-second minimum and a 10-minute upper cap.
 
-### Features
+To switch from local mode back to the official Telegram Bot API:
 
-✅ Files up to **2 GB** (vs. 20 MB limit with official API)  
-✅ Direct file copy from local server (no download overhead)  
-✅ Toggle with `LOCAL_BOT_API=1/0` — no code changes needed  
-✅ Graceful fallback: old file_ids from official API are resolved automatically  
-✅ Auto file cleanup — files deleted from local server after successful delivery  
+```bash
+curl "http://localhost:8081/bot<YOUR_BOT_TOKEN>/logOut"
+```
 
-### Full Setup Guide
+Then stop the local server and set:
 
-For detailed installation on **macOS, Linux, Windows**, see [**Local Bot API Setup Guide**](LOCAL_BOT_API_SETUP.md):
-- Prerequisites and dependencies
-- Build from source instructions
-- Systemd service setup (Linux)
-- Windows Task Scheduler setup
-- Troubleshooting and debugging
+```env
+LOCAL_BOT_API=0
+```
 
-*Vietnamese version: [Hướng dẫn thiết lập Local Bot API](LOCAL_BOT_API_SETUP.vi.md)*
+### Local Bot API Advantages
+
+- Supports file transfers up to **2 GB**.
+- Avoids unnecessary download overhead by copying files directly from the local server when possible.
+- Can be enabled or disabled through configuration without changing source code.
+- Preserves compatibility with older official-api `file_id` values through fallback logic.
+- Performs automatic cleanup of local files after successful delivery.
+
+For platform-specific setup instructions, including macOS, Linux, Windows, systemd, Windows Task Scheduler, and troubleshooting, see [Local Bot API Setup Guide](LOCAL_BOT_API_SETUP.md).
+
+> Vietnamese version: [Hướng dẫn thiết lập Local Bot API](LOCAL_BOT_API_SETUP.vi.md)
 
 ---
 
-## Bot Commands
+## 🤖 Bot Command Surface
 
 | Command | Description |
 |---|---|
-| `/login` | Initiate Zalo QR login (Web API — same as `/loginweb`) |
-| `/loginweb` | Initiate Zalo QR login via Web API; session saved to `credentials.json` |
-| `/loginapp` | Initiate Zalo QR login via PC App API; session saved to `app-session.json`. Enables rate-limit-free group member lookups |
-| `/search <query>` | Search Zalo friends list; select a result to create a DM topic |
-| `/recall` | Retract a message sent from Telegram to Zalo (reply to the target message) |
-| `/topic list` | List all active topic–conversation mappings |
-| `/topic info` | Show the Zalo conversation details for the current topic |
-| `/topic delete` | Remove the mapping for the current topic |
+| `/login` | Starts Zalo QR login through the Web API. Equivalent to `/loginweb`. |
+| `/loginweb` | Starts Zalo QR login through the Web API and persists the session to `credentials.json`. |
+| `/loginapp` | Starts Zalo QR login through the PC App API and persists the session to `app-session.json`. Enables lower-pressure group-member lookups. |
+| `/search <query>` | Searches the Zalo friends list and allows the user to create a direct-message topic from a selected result. |
+| `/recall` | Retracts a message previously sent by the bot from Telegram to Zalo. Must be used as a reply to the target message. |
+| `/topic list` | Lists active Telegram-topic-to-Zalo-conversation mappings. |
+| `/topic info` | Shows the Zalo conversation metadata associated with the current topic. |
+| `/topic delete` | Removes the mapping associated with the current topic. |
 
 ---
 
-## Project Structure
+## 🧬 Project Structure
 
-```
+```text
 src/
-├── index.ts                  Entry point. Initialises Telegraf, Zalo client,
-│                             attaches both handlers, starts polling.
-├── config.ts                 Reads and validates environment variables.
-├── store.ts                  All in-memory and on-disk state:
-│                               - topicStore      (persisted, topics.json)
-│                               - msgStore        (Zalo msgId ↔ TG message_id)
-│                               - sentMsgStore    (TG→Zalo msgId reverse index)
-│                               - pollStore       (poll ↔ TG poll message mapping)
-│                               - mediaGroupStore (TG media group buffer)
-│                               - zaloAlbumStore  (Zalo album buffer)
-│                               - userCache       (uid ↔ displayName + group-scoped lookup)
-│                               - aliasCache      (uid ↔ alias + reverse alias→uid lookup)
-│                               - friendsCache    (friends list, 5-min TTL)
+├── index.ts                  Application entry point. Initialises Telegraf,
+│                             creates the Zalo client, attaches handlers,
+│                             and starts polling.
+│
+├── config.ts                 Reads, validates, and normalises environment variables.
+│
+├── store.ts                  Centralised runtime and persistent state management:
+│                               - topicStore       persisted topic mappings
+│                               - msgStore         Zalo msgId ↔ Telegram message_id
+│                               - sentMsgStore     Telegram-to-Zalo reverse index
+│                               - pollStore        poll and score-message mappings
+│                               - mediaGroupStore  Telegram media-group buffer
+│                               - zaloAlbumStore   Zalo album buffer
+│                               - userCache        UID and display-name lookup
+│                               - aliasCache       alias-to-UID resolution
+│                               - friendsCache     friends list with 5-minute TTL
+│
 ├── telegram/
-│   ├── bot.ts                Telegraf instance; sets allowedUpdates and bot commands.
-│   └── handler.ts            Processes all Telegram updates and forwards to Zalo.
-│                             Handles: text, media, voice, sticker, poll, location,
-│                             contact, reaction, callback_query, poll_answer.
-│                             Mention resolution: display name → uid, then alias → uid.
+│   ├── bot.ts                Telegraf instance configuration, allowed updates,
+│   │                         and bot-command registration.
+│   └── handler.ts            Telegram update processor. Handles text, media,
+│                             voice, stickers, polls, locations, contacts,
+│                             reactions, callback queries, and poll answers.
+│                             Mention resolution uses display names first,
+│                             followed by aliases.
+│
 ├── zalo/
-│   ├── client.ts             Zalo API initialisation and Web API QR login flow.
-│   ├── loginApp.ts           PC App QR login flow (zaloapp.com session).
-│   │                         Saves data/app-session.json after successful login.
-│   ├── appApi.ts             Direct PC App API helpers (group-wpa.zaloapp.com,
-│   │                         profile-wpa.zaloapp.com). Used for rate-limit-free
-│   │                         group member lookups. AES-128/192/256 auto-detected.
-│   ├── types.ts              TypeScript interfaces and ZALO_MSG_TYPES constant.
-│   └── handler.ts            Processes all Zalo listener events and forwards to TG.
-│                             Handles: message (all msgTypes), undo, reaction,
-│                             group_event (join/leave/poll/update_board).
-│                             populateGroupMemberCache: 3-tier lookup strategy.
+│   ├── client.ts             Zalo API initialisation and Web API QR login.
+│   ├── loginApp.ts           PC App QR login flow and zaloapp.com session storage.
+│   ├── appApi.ts             Direct PC App API helpers for group and member
+│   │                         lookups. Supports AES-128, AES-192, and AES-256
+│   │                         session-key detection.
+│   ├── types.ts              TypeScript interfaces and ZALO_MSG_TYPES constants.
+│   └── handler.ts            Zalo listener processor. Handles message events,
+│                             undo events, reactions, and group events including
+│                             joins, leaves, poll updates, and board updates.
+│
 └── utils/
-    ├── format.ts             HTML escaping, mention application, caption helpers.
-    └── media.ts              Temporary file download, cleanup, OGG→M4A conversion.
+    ├── format.ts             HTML escaping, mention application, and caption helpers.
+    └── media.ts              Temporary media download, cleanup, and OGG-to-M4A conversion.
 ```
 
 ---
 
-## Data Files
+## 🗄️ Persistent Data Model
 
 ### `data/credentials.json`
 
-Zalo **Web API** session (set by `/loginweb` or `/login`). Contains the standard zca-js session token — treat as account credentials.
+Stores the Zalo **Web API** session created by `/loginweb` or `/login`. This file contains authentication material equivalent to account credentials and must be protected accordingly.
 
 ### `data/app-session.json`
 
-Zalo **PC App** session (set by `/loginapp`). Contains:
-- `zpw_enk` — AES session encryption key (base64-encoded; 16 bytes = AES-128 auto-detected)
-- `imei` — device identifier
-- `cookies` — `zaloapp.com` raw cookie array
+Stores the Zalo **PC App** session created by `/loginapp`.
 
-This session is used exclusively by `appApi.ts` for calls to `group-wpa.zaloapp.com` and `profile-wpa.zaloapp.com`. **Listed in `.gitignore`**; treat with the same protection as `credentials.json`.
+| Field | Purpose |
+|---|---|
+| `zpw_enk` | Base64-encoded AES session key. AES-128, AES-192, and AES-256 are auto-detected by key length. |
+| `imei` | Device identifier. |
+| `cookies` | Raw `zaloapp.com` cookie array. |
+
+This session is consumed exclusively by `appApi.ts` for calls to `group-wpa.zaloapp.com` and `profile-wpa.zaloapp.com`. The file is listed in `.gitignore` and must be handled with the same care as `credentials.json`.
 
 ### `data/topics.json`
 
-Plain JSON. Maps each Zalo conversation ID (group or DM) to its Telegram Forum Topic ID plus metadata (display name, type). Written on every new topic creation; read once at startup.
+Stores the persistent mapping between each Zalo conversation ID and its Telegram Forum Topic ID. The file also includes conversation metadata such as display name and conversation type. It is written whenever a new topic mapping is created and read once at startup.
 
-### `data/msg-map.json` (gzipped binary)
+### `data/msg-map.json`
 
-Persists the bidirectional mapping between Zalo message IDs and Telegram message IDs so that reply chains survive a process restart. The file is **gzip-compressed** (detected automatically via the `0x1F 0x8B` magic bytes at load time) and uses a compact **v2 format** to minimise I/O.
+Stores the bidirectional relationship between Zalo message IDs and Telegram message IDs. Despite the `.json` suffix, the file is gzip-compressed and detected through the `0x1F 0x8B` gzip magic bytes at load time.
 
-#### v2 format (written since May 2026)
+The current v2 format uses string interning and positional arrays to reduce I/O overhead and disk usage.
+
+#### v2 Format
 
 ```jsonc
 {
   "v": 2,
-  // String intern table — every repeated string (zaloId, msgType, UID…) is
-  // stored once here and referenced by index in the data arrays below.
+  // String intern table. Repeated strings such as zaloId, msgType, and UID
+  // are stored once and referenced by index in the arrays below.
   "s": ["850431…", "webchat", "uid123", …],
-  // Pairs: [zaloMsgId, tgMessageId]
-  // zaloMsgId is an index into "s"; tgMessageId is a plain number.
+
+  // Message pairs: [zaloMsgIdIndex, telegramMessageId]
   "p": [[0, 123456], [1, 123457], …],
-  // Quote data per TG message (used for reply chain resolution and auto-mention):
+
+  // Quote metadata used for reply-chain reconstruction and auto-mention:
   // [tgId, msgIdIdx, cliMsgIdIdx, uidFromIdx, ts, msgTypeIdx, content, ttl, zaloIdIdx, threadType]
   "q": [[123456, 0, 1, 2, 1746000000, 5, "hello", 0, 0, 1], …]
 }
 ```
 
-#### Why "0" entries are filtered out
+#### Filtering `"0"` Message IDs
 
-Zalo sets `realMsgId = 0` for messages that have no secondary ID. Because `String(0) === "0"`, these were previously stored as `["0", tgId]` pairs — up to **45 % of all pairs**. They are now discarded at both write time (`msgStore.save`) and read time (`_loadMsgMap`):
+Zalo may emit `realMsgId = 0` for messages without a secondary identifier. In earlier formats, these values were serialised as the string `"0"`, which caused unrelated messages to collide under the same lookup key.
 
-- No legitimate lookup ever queries `"0"`: real Zalo message IDs are 13-digit timestamps.
-- Keeping them caused a hidden collision bug: every message with `realMsgId = 0` overwrote the same key, so `getTgMsgId("0")` would return the TG ID of an arbitrary recent message — producing a false-positive reply target.
+The current implementation discards these entries during both save and load:
 
-#### Size progression
+- Legitimate Zalo message lookups do not target `"0"`; real Zalo message IDs are timestamp-like identifiers.
+- Retaining `"0"` entries can produce false-positive reply targets because the most recent message with `realMsgId = 0` overwrites previous entries.
+- Filtering these entries substantially reduces persisted mapping size.
 
-| Format | Size |
-|---|---|
+#### Size Evolution
+
+| Format | Approximate Size |
+|---|---:|
 | v1 plain JSON | ~80 KB |
-| v2 intern + positional arrays | ~46 KB (−44 %) |
-| v2 + gzip level 9 + no-zero filtering | ~13 KB (−85 %) |
+| v2 interned strings and positional arrays | ~46 KB, approximately 44% smaller |
+| v2 with gzip level 9 and zero-ID filtering | ~13 KB, approximately 85% smaller |
 
-`gunzipSync` on 13 KB is measurably faster than `JSON.parse` on 80 KB; the built-in `node:zlib` module is used — no extra dependencies.
-
----
-
-## Security Considerations
-
-- `.env`, `credentials.json`, and `app-session.json` are listed in `.gitignore` and must never be committed to version control.
-- `credentials.json` contains a Zalo Web API session token equivalent to the account password. Treat it with the same level of protection.
-- `app-session.json` contains a Zalo PC App session equivalent to the account password. The same protection applies.
-- The bridge runs as a single-user system: the Telegram group should be private and restricted to trusted members only, as any member can send messages through the bridge.
-- All outbound HTTP requests to Telegram and Zalo use TLS. No credentials are logged.
-- The `/recall` command is unrestricted within the group — any group member can retract messages the bot sent. Restrict bot admin rights or group membership if this is a concern.
+For the current mapping size, `gunzipSync` on the compressed file is measurably faster than parsing the original 80 KB JSON representation. Compression is implemented with Node.js' built-in `node:zlib` module and requires no additional dependency.
 
 ---
 
-## Contributors
+## 🛡️ Security Model
+
+> [!CAUTION]
+> Treat `.env`, `credentials.json`, and `app-session.json` as sensitive operational secrets. They should never be committed, shared, or copied into untrusted environments.
+
+Security considerations:
+
+- Never commit `.env`, `credentials.json`, or `app-session.json` to version control.
+- `credentials.json` contains a Zalo Web API session and should be treated as equivalent to an account password.
+- `app-session.json` contains a Zalo PC App session and must be protected with the same level of care.
+- The bridge is designed for a trusted, single-operator or small-team environment.
+- The Telegram supergroup should remain private and restricted to trusted members, because group members can send messages through the bridge.
+- Outbound requests to Telegram and Zalo are transmitted over TLS.
+- The bridge does not intentionally log credentials.
+- The `/recall` command is available to group members and can retract messages sent by the bot. Restrict group membership and bot permissions according to your operational risk model.
+
+---
+
+## 👥 Contributors
 
 Thanks to everyone who has contributed to this project.
 
 ### Code Contributors
 
-- [@thanhnguyenhy234](https://github.com/thanhnguyenhy234)  
-- [@leolionart](https://github.com/leolionart)  
+- [@thanhnguyenhy234](https://github.com/thanhnguyenhy234)
+- [@leolionart](https://github.com/leolionart)
 
+### Contributing
 
-### Want to contribute?
+Contributions are welcome. Bug fixes, documentation improvements, architectural refinements, compatibility patches, and feature proposals can be submitted through pull requests.
 
-Contributions are welcome!  
-If you want to fix bugs, add features, improve documentation, or suggest improvements, feel free to open a Pull Request.
+To be listed as a contributor, submit a meaningful contribution through a pull request that is reviewed and merged into the project.
 
-To get listed here, submit a meaningful contribution through a Pull Request.
+---
 
+## 📜 License
 
+See the repository license file for licensing terms.
+
+<div align="center">
+
+<br />
+
+**Built for resilient cross-platform messaging operations.**
+
+</div>
