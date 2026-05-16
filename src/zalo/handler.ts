@@ -593,11 +593,10 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
         displayName = info.name || senderName;
         groupAvatarUrl = info.avt;
       } else {
-        // For DMs, zaloId is the peer's UID — resolve their real name then apply alias/contact name.
-        // Use the same contact-book name both for the topic and the message caption/header.
+        // For DMs, zaloId is the peer's UID — resolve their real name for the topic name.
+        // bridgeSenderName is already set correctly above (sender's name, or 'Bạn' if isSelf).
         const realName = await resolveUserDisplayName(api, zaloId);
         displayName = realName;
-        bridgeSenderName = displayName;
       }
 
       // Keep userCache up-to-date so TG→Zalo mention resolution works.
