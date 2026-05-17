@@ -122,7 +122,7 @@ export interface ZaloQuoteData {
   threadType: 0 | 1;
 }
 
-const MSG_CACHE_MAX = 2000;
+const MSG_CACHE_MAX = 10000;
 
 // ── Persistence helpers for msgStore ─────────────────────────────────────────
 //
