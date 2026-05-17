@@ -718,11 +718,21 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
         // Zalo rich-text messages still use msgType "webchat", but content is
         // an object like { title, action: "rtf", params: "{styles:...}" }.
         // Without using media.title here, formatted announcements silently drop.
-        const body = text
+        let body = text
           ?? ((typeof msg.data.content === 'string' ? msg.data.content : '')
             || media.title
+            || media.description
             || '');
-        if (!body.trim()) return;
+
+        // If the content is an object and we couldn't extract text, stringify it
+        if (!body.trim() && typeof msg.data.content === 'object' && msg.data.content !== null) {
+          body = JSON.stringify(msg.data.content);
+        }
+
+        if (!body.trim()) {
+          console.log(`[ZaloHandler] Empty text body dropped, msgId=${msg.data.msgId}`, JSON.stringify(msg.data));
+          return;
+        }
         const mentions = msg.data.mentions;
 
         // Parse Zalo text-style metadata (bold, italic, underline, strike).
