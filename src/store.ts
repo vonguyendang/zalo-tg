@@ -708,13 +708,16 @@ export const sentMsgStore = {
   },
 
   /**
-   * Returns true if the bot is currently sending (or just finished sending within
-   * 15 s) to this zaloId — used to suppress isSelf echo in the Zalo listener.
-   * Thời gian dài để cover cả upload file chậm.
+   * Returns true if the bot is currently sending to this zaloId.
+   * Used to suppress isSelf echo in the Zalo listener.
+   * The echo handler in zalo/handler.ts now skips all isSelf messages
+   * unconditionally, so the primary echo suppression no longer depends
+   * on this window. Reduced from 15s to 5s to minimise false suppression
+   * of genuine messages arriving from other devices.
    */
   isSendingTo(zaloId: string): boolean {
     const ts = _pendingSendConvos.get(zaloId);
-    return ts !== undefined && Date.now() - ts < 15_000;
+    return ts !== undefined && Date.now() - ts < 5_000;
   },
 
   stats(): { entries: number } {
