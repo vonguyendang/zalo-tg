@@ -61,6 +61,8 @@ function parseBankCardHtml(html: string): BankCardInfo | null {
  * Fetch group member list and populate `userCache` so mention resolution works
  * immediately even before any group message is received.
  */
+let _userInfoRateLimitUntil = 0;
+
 async function populateGroupMemberCache(api: ZaloAPI, groupId: string): Promise<void> {
   try {
     // --- Step 1: try PC App endpoint first (group-wpa.zaloapp.com, separate rate-limit) ---
@@ -122,9 +124,15 @@ async function populateGroupMemberCache(api: ZaloAPI, groupId: string): Promise<
       }
 
       // Final fallback: zca-js getUserInfo (web API)
-      if (stillMissing.length > 0) {
+      // Only do this if the missing count is reasonably small to avoid immediate rate-limiting,
+      // and only if we are not currently rate-limited.
+      if (stillMissing.length > 0 && stillMissing.length <= 200) {
         const BATCH = 50;
         for (let i = 0; i < stillMissing.length; i += BATCH) {
+          if (Date.now() < _userInfoRateLimitUntil) {
+            console.log(`[Zalo] Skipping getUserInfo batch for ${groupId} due to rate limit`);
+            break;
+          }
           if (i > 0) await new Promise(r => setTimeout(r, 3000));
           const batch = stillMissing.slice(i, i + BATCH);
           try {
@@ -145,10 +153,13 @@ async function populateGroupMemberCache(api: ZaloAPI, groupId: string): Promise<
             const errMsg = batchErr instanceof Error ? batchErr.message : String(batchErr);
             console.warn(`[Zalo] getUserInfo batch failed for ${groupId}:`, errMsg);
             if (errMsg.includes('Vượt quá số request') || errMsg.includes('221')) {
+              _userInfoRateLimitUntil = Date.now() + 10 * 60 * 1000; // 10 minutes
               break; // Abort remaining batches for this group to avoid extending the rate-limit ban
             }
           }
         }
+      } else if (stillMissing.length > 200) {
+        console.log(`[Zalo] Skipping web API fallback for ${groupId} because missing count (${stillMissing.length}) is too high`);
       }
     }
 
@@ -243,6 +254,10 @@ async function resolveUserDisplayName(api: ZaloAPI, uid: string | undefined, fal
   const cached = userCache.getName(cleanUid);
   if (cached?.trim()) return cached;
 
+  if (Date.now() < _userInfoRateLimitUntil) {
+    return (fallback && fallback !== 'ai đó') ? fallback : (cleanUid || fallback);
+  }
+
   try {
     const resp = await api.getUserInfo(cleanUid) as {
       changed_profiles?: Record<string, { displayName?: string; zaloName?: string }>;
@@ -261,7 +276,13 @@ async function resolveUserDisplayName(api: ZaloAPI, uid: string | undefined, fal
       return name;
     }
   } catch (err) {
-    console.warn(`[Zalo] resolveUserDisplayName failed for ${cleanUid}:`, err);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (errMsg.includes('Vượt quá số request') || errMsg.includes('221')) {
+      _userInfoRateLimitUntil = Date.now() + 10 * 60 * 1000; // 10 mins
+      console.warn(`[Zalo] resolveUserDisplayName rate-limited for ${cleanUid}`);
+    } else {
+      console.warn(`[Zalo] resolveUserDisplayName failed for ${cleanUid}:`, errMsg);
+    }
   }
 
   // Prefer the caller-supplied fallback (e.g. senderName from message data)
@@ -586,12 +607,12 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
       //   - Group: use group name from getGroupInfo for topic, but use the sender's
       //     contact-book name in message captions/headers when available.
       //   - DM: use the PEER's contact-book name (zaloId = peer UID), not the raw sender dName.
-      // NOTE: We do NOT pass `senderName` (msg.data.dName) as fallback to
-      // resolveUserDisplayName because Zalo's dName field is unreliable — it can
-      // contain filenames or metadata (e.g. "My Documents") instead of the sender's
-      // real name. The default fallback chain (UID → 'ai đó') is safer.
+      // NOTE: We pass `senderName` (msg.data.dName) as fallback to resolveUserDisplayName.
+      // While Zalo's dName field is sometimes unreliable (e.g. containing "My Documents" 
+      // instead of the sender's real name for file uploads), it is much better to 
+      // display a slightly incorrect name than to display a raw UID during API rate limits.
       let displayName = senderName;
-      let bridgeSenderName = msg.isSelf ? senderName : await resolveUserDisplayName(api, senderUid);
+      let bridgeSenderName = msg.isSelf ? senderName : await resolveUserDisplayName(api, senderUid, senderName);
       let groupAvatarUrl: string | undefined;
       if (type === ThreadType.Group) {
         const info = await getCachedGroupInfo(api, zaloId);
@@ -600,7 +621,7 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
       } else {
         // For DMs, zaloId is the peer's UID — resolve their real name for the topic name.
         // bridgeSenderName is already set correctly above (sender's name, or 'Bạn' if isSelf).
-        const realName = await resolveUserDisplayName(api, zaloId);
+        const realName = await resolveUserDisplayName(api, zaloId, senderName);
         displayName = realName;
       }
 
