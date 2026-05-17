@@ -501,25 +501,17 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
       // the user sends directly from the Zalo app.
       // We check both sentMsgStore (post-save) and isSendingTo (race window).
       if (msg.isSelf) {
-        const selfMsgIds = [msg.data.msgId, msg.data.realMsgId]
-          .filter((id): id is string => typeof id === 'string' && id.length > 0);
-        const isEcho =
-          selfMsgIds.some(id => sentMsgStore.getByZaloMsgId(id) !== undefined)
-          || sentMsgStore.isSendingTo(msg.threadId);
-        if (isEcho) {
-          // The echo carries the real cliMsgId that Zalo assigned to this
-          // message. Update msgStore so that future TG→Zalo replies to this
-          // message can construct a valid quote (with a non-zero cliMsgId).
-          if (msg.data.cliMsgId) {
-            const _tgId = msgStore.getTgMsgId(msg.data.msgId);
-            if (_tgId !== undefined) {
-              msgStore.updateQuoteCliMsgId(_tgId, msg.data.cliMsgId);
-            }
+        // Update cliMsgId from echo for future quote chains
+        if (msg.data.cliMsgId) {
+          const _tgId = msgStore.getTgMsgId(msg.data.msgId);
+          if (_tgId !== undefined) {
+            msgStore.updateQuoteCliMsgId(_tgId, msg.data.cliMsgId);
           }
-          console.log(`[Zalo→TG] Skip bot echo (${selfMsgIds.join(', ')})`);
-          return;
         }
-        // isSelf but NOT a bot echo → user sent from Zalo app, forward to TG
+        // Personal bridge: skip all self messages unconditionally.
+        // Prevents echo loops when Zalo echo msgId differs from API response.
+        console.log(`[Zalo→TG] Skip self message (${msg.data.msgId})`);
+        return;
       }
 
       // Skip duplicate deliveries — Zalo re-emits the same message event when
