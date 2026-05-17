@@ -3,6 +3,17 @@ import { gzipSync, gunzipSync } from 'zlib';
 import path from 'path';
 import { config } from './config.js';
 
+/**
+ * Track Zalo message IDs recently recalled from Telegram side.
+ * The undo event handler checks this to avoid sending duplicate
+ * "🗑 đã thu hồi" notifications for recalls we initiated ourselves.
+ */
+export const recentlyRecalledMsgIds = new Set<string>();
+export function markRecalled(msgId: string): void {
+  recentlyRecalledMsgIds.add(msgId);
+  setTimeout(() => recentlyRecalledMsgIds.delete(msgId), 5_000);
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface TopicEntry {
