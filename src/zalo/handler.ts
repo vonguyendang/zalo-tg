@@ -497,9 +497,8 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
 
   api.listener.on('message', async (msg: ZaloMessage) => {
     try {
-      // Skip messages sent by the bot (TG→Zalo echo) but NOT messages
-      // the user sends directly from the Zalo app.
-      // We check both sentMsgStore (post-save) and isSendingTo (race window).
+      // Skip TG→Zalo echo (re-emitted by Zalo server) but forward
+      // real self messages sent directly from the Zalo app.
       if (msg.isSelf) {
         // Update cliMsgId from echo for future quote chains
         if (msg.data.cliMsgId) {
@@ -508,10 +507,15 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
             msgStore.updateQuoteCliMsgId(_tgId, msg.data.cliMsgId);
           }
         }
-        // Personal bridge: skip all self messages unconditionally.
-        // Prevents echo loops when Zalo echo msgId differs from API response.
-        console.log(`[Zalo→TG] Skip self message (${msg.data.msgId})`);
-        return;
+        // If this msgId is already tracked in sentMsgStore OR we're in the
+        // middle of sending to this Zalo thread → it's an echo, skip.
+        const isEcho = sentMsgStore.getByZaloMsgId(msg.data.msgId) !== undefined
+          || sentMsgStore.isSendingTo(msg.threadId);
+        if (isEcho) {
+          console.log(`[Zalo→TG] Skip echo self message (${msg.data.msgId})`);
+          return;
+        }
+        // Real self message from Zalo app — fall through and forward to Telegram
       }
 
       // Skip duplicate deliveries — Zalo re-emits the same message event when
