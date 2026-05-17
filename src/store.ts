@@ -122,7 +122,7 @@ export interface ZaloQuoteData {
   threadType: 0 | 1;
 }
 
-const MSG_CACHE_MAX = 10000;
+const MSG_CACHE_MAX = 50000;
 
 // ── Persistence helpers for msgStore ─────────────────────────────────────────
 //
@@ -355,7 +355,7 @@ export const msgStore = {
  * Populated automatically as messages arrive; used to resolve TG @mention text
  * back to a Zalo UID when forwarding TG → Zalo.
  */
-const USER_CACHE_MAX  = 5000;
+const USER_CACHE_MAX  = 20000;
 const _uidToName      = new Map<string, string>();
 const _normToUid      = new Map<string, string>();
 /** zaloId → (normalizedName → uid) — collision-safe per-group lookup */
@@ -652,7 +652,7 @@ const _sentByZaloId = new Map<string, number>();       // String(zaloMsgId) → 
 
 /** Insertion-order tracking for sentMap eviction (oldest first) */
 const _sentKeyOrder: number[] = [];
-const SENT_MAP_MAX = 5000;
+const SENT_MAP_MAX = 20000;
 
 /** zaloId values currently being sent by the bot (to handle echo race condition) */
 const _pendingSendConvos = new Map<string, number>(); // zaloId → timestamp
