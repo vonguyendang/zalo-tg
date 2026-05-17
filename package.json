@@ -25,7 +25,7 @@
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",
     "@types/image-size": "^0.7.0",
-    "@types/node": "^20.14.0",
+    "@types/node": "^20.19.41",
     "@types/qrcode-terminal": "^0.12.2",
     "tsx": "^4.15.6",
     "typescript": "^5.4.5",
