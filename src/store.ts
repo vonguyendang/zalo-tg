@@ -7,14 +7,14 @@ import { config } from './config.js';
 
 export interface TopicEntry {
   topicId: number;
-  zaloId:  string;   // threadId (UID for DMs, groupId for groups)
-  type:    0 | 1;    // 0 = ThreadType.User, 1 = ThreadType.Group
-  name:    string;   // contact name or group name
+  zaloId: string;   // threadId (UID for DMs, groupId for groups)
+  type: 0 | 1;    // 0 = ThreadType.User, 1 = ThreadType.Group
+  name: string;   // contact name or group name
 }
 
 interface StoreData {
   /** topicId (as string key) → entry */
-  topics:    Record<string, TopicEntry>;
+  topics: Record<string, TopicEntry>;
   /** `${type}:${zaloId}` → topicId */
   zaloIndex: Record<string, number>;
 }
@@ -109,20 +109,20 @@ export const store = {
  * Field names match what zca-js sendMessage reads from the `quote` param.
  */
 export interface ZaloQuoteData {
-  msgId:    string;
+  msgId: string;
   cliMsgId: string;
-  uidFrom:  string;
-  ts:       string;
-  msgType:  string;
-  content:  string | Record<string, unknown>;
-  ttl:      number;
+  uidFrom: string;
+  ts: string;
+  msgType: string;
+  content: string | Record<string, unknown>;
+  ttl: number;
   /** The Zalo conversation ID (group ID or peer UID) this message belongs to. */
-  zaloId:   string;
+  zaloId: string;
   /** 0 = DM, 1 = Group */
   threadType: 0 | 1;
 }
 
-const MSG_CACHE_MAX = 10000;
+const MSG_CACHE_MAX = 50000;
 
 // ── Persistence helpers for msgStore ─────────────────────────────────────────
 //
@@ -140,7 +140,7 @@ const MSG_CACHE_MAX = 10000;
 //   Backward-compatible: v1 files without "v" field load fine.
 
 interface MsgMapV1 {
-  pairs:  [string, number][];
+  pairs: [string, number][];
   quotes: [number, ZaloQuoteData][];
 }
 interface MsgMapV2 {
@@ -152,7 +152,7 @@ interface MsgMapV2 {
 type MsgMapFile = MsgMapV1 | MsgMapV2;
 
 interface MsgMapData {
-  pairs:  [string, number][];
+  pairs: [string, number][];
   quotes: [number, ZaloQuoteData][];
 }
 
@@ -176,12 +176,12 @@ function _loadMsgMap(): MsgMapData {
           {
             msgId,
             cliMsgId,
-            uidFrom:    s[uidIdx]!,
+            uidFrom: s[uidIdx]!,
             ts,
-            msgType:    s[typeIdx]!,
+            msgType: s[typeIdx]!,
             content,
             ttl,
-            zaloId:     s[zaloIdx]!,
+            zaloId: s[zaloIdx]!,
             threadType,
           } satisfies ZaloQuoteData,
         ],
@@ -355,9 +355,9 @@ export const msgStore = {
  * Populated automatically as messages arrive; used to resolve TG @mention text
  * back to a Zalo UID when forwarding TG → Zalo.
  */
-const USER_CACHE_MAX  = 5000;
-const _uidToName      = new Map<string, string>();
-const _normToUid      = new Map<string, string>();
+const USER_CACHE_MAX = 20000;
+const _uidToName = new Map<string, string>();
+const _normToUid = new Map<string, string>();
 /** zaloId → (normalizedName → uid) — collision-safe per-group lookup */
 const _groupNameToUid = new Map<string, Map<string, string>>();
 
@@ -401,7 +401,7 @@ function _loadUserCache(): void {
   }
 }
 
-let _userCacheDirty  = false;
+let _userCacheDirty = false;
 let _userCacheTimer: ReturnType<typeof setTimeout> | null = null;
 
 function _scheduleUserCachePersist(): void {
@@ -542,10 +542,10 @@ export const aliasCache = {
 // ── Friends cache (in-memory, TTL-refreshed) ──────────────────────────────────
 
 export interface ZaloFriend {
-  userId:      string;
+  userId: string;
   displayName: string;
   /** tên danh bạ (alias), nếu có */
-  alias?:      string;
+  alias?: string;
 }
 
 function upsertAliasFromFriend(friend: ZaloFriend): void {
@@ -557,13 +557,13 @@ function upsertAliasFromFriend(friend: ZaloFriend): void {
 
 const FRIENDS_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-let _friends:    ZaloFriend[] = [];
-let _friendsTs:  number       = 0;
+let _friends: ZaloFriend[] = [];
+let _friendsTs: number = 0;
 
 export const friendsCache = {
   /** Store a fresh friends list. */
   set(list: ZaloFriend[]): void {
-    _friends   = list;
+    _friends = list;
     _friendsTs = Date.now();
     for (const friend of list) upsertAliasFromFriend(friend);
   },
@@ -578,7 +578,7 @@ export const friendsCache = {
     return _friends
       .filter(f => {
         const searchName = (f.alias || f.displayName || '').toLowerCase().normalize('NFD').replace(/\p{Mn}/gu, '');
-        const realName   = f.displayName.toLowerCase().normalize('NFD').replace(/\p{Mn}/gu, '');
+        const realName = f.displayName.toLowerCase().normalize('NFD').replace(/\p{Mn}/gu, '');
         return searchName.includes(q) || realName.includes(q);
       })
       .slice(0, limit);
@@ -601,18 +601,18 @@ export const friendsCache = {
 // ── Groups cache (in-memory, TTL-refreshed) ───────────────────────────────────
 
 export interface ZaloGroup {
-  groupId:     string;
-  name:        string;
+  groupId: string;
+  name: string;
   totalMember: number;
 }
 
 const GROUPS_TTL_MS = 5 * 60 * 1000; // 5 minutes
-let _groups:   ZaloGroup[] = [];
-let _groupsTs: number      = 0;
+let _groups: ZaloGroup[] = [];
+let _groupsTs: number = 0;
 
 export const groupsCache = {
   set(list: ZaloGroup[]): void {
-    _groups   = list;
+    _groups = list;
     _groupsTs = Date.now();
   },
 
@@ -640,19 +640,19 @@ export const groupsCache = {
 export interface SentMsgInfo {
   /** Zalo msgId(s) returned by api.sendMessage / api.sendVoice.
    *  Có thể nhiều msgId khi gửi album (mỗi file là một tin Zalo riêng). */
-  msgIds:     (string | number)[];
+  msgIds: (string | number)[];
   /** Zalo conversation ID */
-  zaloId:     string;
+  zaloId: string;
   /** 0 = DM, 1 = Group */
   threadType: 0 | 1;
 }
 
-const _sentMap      = new Map<number, SentMsgInfo>(); // tgMsgId → info
+const _sentMap = new Map<number, SentMsgInfo>(); // tgMsgId → info
 const _sentByZaloId = new Map<string, number>();       // String(zaloMsgId) → tgMsgId
 
 /** Insertion-order tracking for sentMap eviction (oldest first) */
 const _sentKeyOrder: number[] = [];
-const SENT_MAP_MAX = 5000;
+const SENT_MAP_MAX = 20000;
 
 /** zaloId values currently being sent by the bot (to handle echo race condition) */
 const _pendingSendConvos = new Map<string, number>(); // zaloId → timestamp
@@ -829,19 +829,19 @@ export const reactionEchoStore = {
 // ── TG media group buffer (TG→Zalo album sync) ────────────────────────────────
 
 export interface MediaGroupItem {
-  fileId:    string;
-  fname:     string;
+  fileId: string;
+  fname: string;
   fileSize?: number;
-  caption?:  string;
+  caption?: string;
   captionMentions?: Array<{ pos: number; uid: string; len: number }>;
-  tgMsgId?:  number;
+  tgMsgId?: number;
 }
 
 interface MediaGroupBuffer {
-  timer:      ReturnType<typeof setTimeout>;
-  items:      MediaGroupItem[];
-  topicId:    number;
-  zaloId:     string;
+  timer: ReturnType<typeof setTimeout>;
+  items: MediaGroupItem[];
+  topicId: number;
+  zaloId: string;
   threadType: 0 | 1;
   replyToMsgId?: number;
 }
@@ -881,13 +881,13 @@ export const mediaGroupStore = {
 // ── Zalo album buffer (Zalo→TG multi-photo) ────────────────────────────────────
 
 interface ZaloAlbumBuffer {
-  timer:      ReturnType<typeof setTimeout>;
-  urls:       string[];
+  timer: ReturnType<typeof setTimeout>;
+  urls: string[];
   senderName: string;
-  topicId:    number;
-  tgBase:     { message_thread_id: number; reply_parameters?: { message_id: number; allow_sending_without_reply: boolean } };
+  topicId: number;
+  tgBase: { message_thread_id: number; reply_parameters?: { message_id: number; allow_sending_without_reply: boolean } };
   zaloMsgIds: string[];
-  zaloQuote:  ZaloQuoteData | undefined;
+  zaloQuote: ZaloQuoteData | undefined;
 }
 
 const _zaloAlbumBuffers = new Map<string, ZaloAlbumBuffer>(); // key = `${threadId}:${uidFrom}`
@@ -938,16 +938,16 @@ export const zaloAlbumStore = {
 // ── Poll store (Zalo ↔ TG native poll, persisted to disk) ─────────────────────
 
 export interface PollEntry {
-  pollId:           number;
-  zaloGroupId:      string;
-  tgPollMsgId:      number;    // TG message_id of the bot-owned clone poll
+  pollId: number;
+  zaloGroupId: string;
+  tgPollMsgId: number;    // TG message_id of the bot-owned clone poll
   tgOrigPollMsgId?: number;    // TG message_id of the user's original poll (to stopPoll on lock)
-  tgPollUUID:       string;    // TG poll identifier from ctx.pollAnswer.poll_id
-  tgScoreMsgId:     number;    // TG message_id of the editable vote-count text below
-  tgThreadId:       number;    // Forum thread (topic) id
+  tgPollUUID: string;    // TG poll identifier from ctx.pollAnswer.poll_id
+  tgScoreMsgId: number;    // TG message_id of the editable vote-count text below
+  tgThreadId: number;    // Forum thread (topic) id
   options: {
     option_id: number;
-    content:   string;
+    content: string;
   }[];
 }
 
@@ -988,8 +988,8 @@ function _schedulePollPersist(): void {
 }
 
 const _pollByZaloId = new Map<number, PollEntry>();       // pollId → entry
-const _pollByTgId   = new Map<number, PollEntry>();       // tgPollMsgId → entry
-const _pollByUUID   = new Map<string, PollEntry>();       // tgPollUUID → entry
+const _pollByTgId = new Map<number, PollEntry>();       // tgPollMsgId → entry
+const _pollByUUID = new Map<string, PollEntry>();       // tgPollUUID → entry
 
 // Load persisted polls on startup
 _loadPolls();
