@@ -1,6 +1,4 @@
 #!/bin/bash
-# Zalo-TG bridge runner with auto-update
-# When the bridge exits with code 42, it pulls latest changes and restarts.
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
