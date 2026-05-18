@@ -727,16 +727,4 @@ Contributions are welcome. Bug fixes, documentation improvements, architectural 
 
 To be listed as a contributor, submit a meaningful contribution through a pull request that is reviewed and merged into the project.
 
----
 
-## 📜 License
-
-See the repository license file for licensing terms.
-
-<div align="center">
-
-<br />
-
-**Built for resilient cross-platform messaging operations.**
-
-</div>
