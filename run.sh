@@ -15,7 +15,7 @@ while true; do
     echo "[Runner] Update signal received (code 42). Pulling latest changes..."
     
     echo "[Runner] git pull origin main..."
-    git pull origin main
+    git pull --autostash origin main
     if [ $? -ne 0 ]; then
       echo "[Runner] git pull failed — aborting update loop"
       exit 1
