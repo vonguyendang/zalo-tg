@@ -1,4 +1,5 @@
 import { Reactions, ThreadType, type AttachmentSource } from 'zca-js';
+import type { Context } from 'telegraf';
 import path from 'path';
 import { createReadStream } from 'fs';
 import { readFile, stat } from 'fs/promises';
@@ -491,9 +492,9 @@ export function setupTelegramHandler(
   });
 
   // /group_info — show Zalo group metadata and member names for the current topic.
-  // Usage inside a Zalo group topic: /group_info [all]
-  tgBot.command('group_info', async (ctx) => {
-    if (ctx.chat.id !== config.telegram.groupId) return;
+  // Usage inside a Zalo group topic: /group_info [all] or /group_infoall
+  const handleGroupInfoCommand = async (ctx: Context & { message: { text?: string; message_thread_id?: number } }, forceAll = false) => {
+    if (!ctx.chat || ctx.chat.id !== config.telegram.groupId) return;
     const topicId = 'message_thread_id' in ctx.message
       ? (ctx.message.message_thread_id as number | undefined)
       : undefined;
@@ -519,7 +520,7 @@ export function setupTelegramHandler(
       return;
     }
 
-    const showAll = /\ball\b/i.test(ctx.message.text ?? '');
+    const showAll = forceAll || /\ball\b/i.test(ctx.message.text ?? '');
     const groupId = entry.zaloId;
 
     try {
@@ -633,7 +634,10 @@ export function setupTelegramHandler(
         { ...replyOpts, parse_mode: 'HTML' },
       );
     }
-  });
+  };
+
+  tgBot.command('group_info', async (ctx) => handleGroupInfoCommand(ctx));
+  tgBot.command('group_infoall', async (ctx) => handleGroupInfoCommand(ctx, true));
 
   tgBot.command('recall', async (ctx) => {
     if (ctx.chat.id !== config.telegram.groupId) return;
