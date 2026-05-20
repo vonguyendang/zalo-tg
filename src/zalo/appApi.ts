@@ -222,6 +222,113 @@ export async function appGetGroupMembersInfo(uids: string[]): Promise<Map<string
   return result;
 }
 
+// ── Friend profiles (PC App) ──────────────────────────────────────────────────
+
+export interface AppUserProfile {
+  displayName?: string;
+  zaloName?: string;
+}
+
+function pickProfileMap(parsed: unknown): Record<string, AppUserProfile> {
+  if (!parsed || typeof parsed !== 'object') return {};
+  const p = parsed as Record<string, unknown>;
+  const data = (p.data && typeof p.data === 'object')
+    ? p.data as Record<string, unknown>
+    : undefined;
+
+  const candidates: unknown[] = [
+    data?.profiles,
+    data?.changed_profiles,
+    data?.unchanged_profiles,
+    p.profiles,
+    p.changed_profiles,
+    p.unchanged_profiles,
+  ];
+  for (const c of candidates) {
+    if (c && typeof c === 'object' && !Array.isArray(c)) {
+      return c as Record<string, AppUserProfile>;
+    }
+  }
+  return {};
+}
+
+/**
+ * Fetch friend profiles by UID via PC App API.
+ *
+ * Scraped from app.asar (Zalo Desktop):
+ * - route: POST /api/social/friend/getprofiles/v2
+ * - body:  phonebook_version, friend_pversion_map, avatar_size, language,
+ *          show_online_status, imei
+ */
+export async function appGetFriendProfilesV2(
+  uids: string[],
+  opts: { phonebookVersion?: number; language?: string; showOnlineStatus?: boolean } = {},
+): Promise<Map<string, AppUserProfile> | null> {
+  const sess = loadAppSession();
+  if (!sess) return null;
+
+  const normalized = Array.from(new Set(
+    uids.map(u => String(u).trim()).filter(Boolean),
+  ));
+  if (normalized.length === 0) return new Map();
+
+  const BATCH = 50;
+  const result = new Map<string, AppUserProfile>();
+
+  for (let i = 0; i < normalized.length; i += BATCH) {
+    const batch = normalized.slice(i, i + BATCH);
+    const friendPversionMap = batch.map(u => (u.endsWith('_0') ? u : `${u}_0`));
+
+    const body = {
+      phonebook_version: opts.phonebookVersion ?? 0,
+      friend_pversion_map: friendPversionMap,
+      avatar_size: 120,
+      language: opts.language ?? 'vi',
+      show_online_status: opts.showOnlineStatus ? 1 : 0,
+      imei: sess.imei,
+    };
+    const encBody = encodeAes(JSON.stringify(body), sess.zpw_enk);
+    const url = `${PROFILE_DOMAIN}/api/social/friend/getprofiles/v2`;
+
+    try {
+      const resp = await axios.post<{ error_code: number; data?: string; error_message?: string }>(
+        url,
+        `params=${encodeURIComponent(encBody)}`,
+        {
+          params: commonParams(sess.imei),
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': PC_UA,
+            'Cookie': buildCookieHeader(sess.cookies, url),
+          },
+          timeout: 15_000,
+        },
+      );
+
+      if (resp.data.error_code !== 0 || !resp.data.data) {
+        console.warn(`[AppApi] getFriendProfilesV2 error [${resp.data.error_code}]: ${resp.data.error_message ?? ''}`);
+        continue;
+      }
+
+      const parsed = JSON.parse(decodeAes(resp.data.data, sess.zpw_enk));
+      const profileMap = pickProfileMap(parsed);
+      for (const uid of batch) {
+        const uidKey = uid.endsWith('_0') ? uid : `${uid}_0`;
+        const p = profileMap[uidKey] ?? profileMap[uid];
+        if (!p) continue;
+        const displayName = p.displayName?.trim();
+        const zaloName = p.zaloName?.trim();
+        if (displayName || zaloName) result.set(uid, { displayName, zaloName });
+      }
+    } catch (err) {
+      console.warn(`[AppApi] getFriendProfilesV2 request failed:`, err instanceof Error ? err.message : err);
+      break;
+    }
+  }
+
+  return result;
+}
+
 // ── Friend Requests (PC App) ──────────────────────────────────────────────────
 
 /**

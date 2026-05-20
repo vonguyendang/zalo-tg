@@ -4,7 +4,7 @@ import path from 'path';
 import QRCode from 'qrcode';
 
 import type { ZaloAPI, ZaloMessage, ZaloMediaContent, ZaloGroupInfoResponse } from './types.js';
-import { appGetGroupInfo, appGetGroupMembersInfo } from './appApi.js';
+import { appGetGroupInfo, appGetGroupMembersInfo, appGetFriendProfilesV2 } from './appApi.js';
 import { ZALO_MSG_TYPES } from './types.js';
 import { store } from '../store.js';
 import { tgBot } from '../telegram/bot.js';
@@ -121,11 +121,32 @@ async function populateGroupMemberCache(api: ZaloAPI, groupId: string): Promise<
         else stillMissing.push(uid);
       }
 
-      // Final fallback: zca-js getUserInfo (web API)
+      // Step 3.5: friend profile endpoint (PC App) for unresolved UIDs.
+      const stillMissingAfterApp: string[] = [];
       if (stillMissing.length > 0) {
         const BATCH = 50;
         for (let i = 0; i < stillMissing.length; i += BATCH) {
           const batch = stillMissing.slice(i, i + BATCH);
+          const profiles = await appGetFriendProfilesV2(batch, {
+            phonebookVersion: 0,
+            language: 'vi',
+            showOnlineStatus: false,
+          }).catch(() => null);
+
+          for (const uid of batch) {
+            const p = profiles?.get(uid);
+            const name = p?.displayName?.trim() || p?.zaloName?.trim();
+            if (uid && name) { userCache.saveForGroup(uid, name, groupId); saved++; }
+            else stillMissingAfterApp.push(uid);
+          }
+        }
+      }
+
+      // Final fallback: zca-js getUserInfo (web API)
+      if (stillMissingAfterApp.length > 0) {
+        const BATCH = 50;
+        for (let i = 0; i < stillMissingAfterApp.length; i += BATCH) {
+          const batch = stillMissingAfterApp.slice(i, i + BATCH);
           const resp = await api.getUserInfo(batch) as {
             changed_profiles?: Record<string, { displayName?: string; zaloName?: string }>;
             unchanged_profiles?: Record<string, unknown>;
@@ -220,6 +241,7 @@ async function isMutedZaloGroup(api: ZaloAPI, groupId: string): Promise<boolean>
 // In-flight topic creation promises — prevents duplicate topic creation when
 // many messages arrive concurrently for the same conversation (e.g. 20-photo album).
 const _pendingTopics = new Map<string, Promise<number>>();
+const _pendingUserNameLookups = new Map<string, Promise<string>>();
 
 async function resolveUserDisplayName(api: ZaloAPI, uid: string | undefined, fallback = 'ai đó'): Promise<string> {
   const cleanUid = uid?.trim();
@@ -234,30 +256,62 @@ async function resolveUserDisplayName(api: ZaloAPI, uid: string | undefined, fal
   const cached = userCache.getName(cleanUid);
   if (cached?.trim()) return cached;
 
-  try {
-    const resp = await api.getUserInfo(cleanUid) as {
-      changed_profiles?: Record<string, { displayName?: string; zaloName?: string }>;
-      unchanged_profiles?: Record<string, { displayName?: string; zaloName?: string }>;
-    };
-    // API appends "_0" to bare UIDs before sending, so the response key is "uid_0"
-    const uidKey = cleanUid.includes('_') ? cleanUid : `${cleanUid}_0`;
-    const profile =
-      resp?.changed_profiles?.[uidKey] ??
-      resp?.changed_profiles?.[cleanUid] ??
-      resp?.unchanged_profiles?.[uidKey] ??
-      resp?.unchanged_profiles?.[cleanUid];
-    const name = profile?.displayName?.trim() || profile?.zaloName?.trim();
-    if (name) {
-      userCache.save(cleanUid, name);
-      return name;
-    }
-  } catch (err) {
-    console.warn(`[Zalo] resolveUserDisplayName failed for ${cleanUid}:`, err);
-  }
+  const inFlight = _pendingUserNameLookups.get(cleanUid);
+  if (inFlight) return inFlight;
 
-  // Prefer the caller-supplied fallback (e.g. senderName from message data)
-  // over the raw UID — only use UID when no real name is available at all.
-  return (fallback && fallback !== 'ai đó') ? fallback : (cleanUid || fallback);
+  const lookup = (async (): Promise<string> => {
+    try {
+      // Prefer PC App API scraped from asar:
+      // POST /api/social/friend/getprofiles/v2
+      const profiles = await appGetFriendProfilesV2([cleanUid], {
+        phonebookVersion: 0,
+        language: 'vi',
+        showOnlineStatus: false,
+      });
+      const p = profiles?.get(cleanUid);
+      const appName = p?.displayName?.trim() || p?.zaloName?.trim();
+      if (appName) {
+        userCache.save(cleanUid, appName);
+        return appName;
+      }
+    } catch (err) {
+      console.warn(`[Zalo] app profile lookup failed for ${cleanUid}:`, err);
+    }
+
+    try {
+      const resp = await api.getUserInfo(cleanUid) as {
+        changed_profiles?: Record<string, { displayName?: string; zaloName?: string }>;
+        unchanged_profiles?: Record<string, { displayName?: string; zaloName?: string }>;
+      };
+      // API appends "_0" to bare UIDs before sending, so the response key is "uid_0"
+      const uidKey = cleanUid.includes('_') ? cleanUid : `${cleanUid}_0`;
+      const profile =
+        resp?.changed_profiles?.[uidKey] ??
+        resp?.changed_profiles?.[cleanUid] ??
+        resp?.unchanged_profiles?.[uidKey] ??
+        resp?.unchanged_profiles?.[cleanUid];
+      const name = profile?.displayName?.trim() || profile?.zaloName?.trim();
+      if (name) {
+        userCache.save(cleanUid, name);
+        return name;
+      }
+    } catch (err) {
+      console.warn(`[Zalo] resolveUserDisplayName failed for ${cleanUid}:`, err);
+    }
+
+    // Prefer the caller-supplied fallback (e.g. senderName from message data)
+    // over the raw UID — only use UID when no real name is available at all.
+    return (fallback && fallback !== 'ai đó') ? fallback : (cleanUid || fallback);
+  })();
+
+  _pendingUserNameLookups.set(cleanUid, lookup);
+  try {
+    return await lookup;
+  } finally {
+    if (_pendingUserNameLookups.get(cleanUid) === lookup) {
+      _pendingUserNameLookups.delete(cleanUid);
+    }
+  }
 }
 
 async function maybeRenameExistingDmTopic(
@@ -1285,18 +1339,7 @@ ${escapeHtml(photoCaption)}`
 
         if (contactUid || msgType === ZALO_MSG_TYPES.CONTACT) {
           const uid = contactUid ?? '';
-          // Fetch display name from userCache or API
-          let contactName = userCache.getName(uid) ?? uid;
-          if (uid && contactName === uid) {
-            try {
-              const resp = await api.getUserInfo(uid) as {
-                changed_profiles?: Record<string, { displayName?: string }>;
-              };
-              const uidKey = uid.includes('_') ? uid : `${uid}_0`;
-              contactName = resp?.changed_profiles?.[uidKey]?.displayName ?? uid;
-              if (contactName !== uid) userCache.save(uid, contactName);
-            } catch { /* non-fatal */ }
-          }
+          const contactName = uid ? await resolveUserDisplayName(api, uid, uid) : uid;
           const qrUrl: string | undefined =
             (typeof rawContent === 'object' && rawContent !== null && 'qrCodeUrl' in rawContent)
               ? String((rawContent as Record<string, unknown>).qrCodeUrl)
@@ -1729,18 +1772,7 @@ ${escapeHtml(photoCaption)}`
         const totalPending: number = data?.totalPending ?? uids.length;
 
         for (const uid of uids) {
-          let displayName = uid;
-          try {
-            const resp = await api.getUserInfo(uid) as {
-              changed_profiles?:   Record<string, { displayName?: string; zaloName?: string }>;
-              unchanged_profiles?: Record<string, { displayName?: string; zaloName?: string }>;
-            };
-            const uidKey = uid.includes('_') ? uid : `${uid}_0`;
-            const profile =
-              resp?.changed_profiles?.[uidKey]   ?? resp?.changed_profiles?.[uid]   ??
-              resp?.unchanged_profiles?.[uidKey] ?? resp?.unchanged_profiles?.[uid];
-            displayName = profile?.displayName?.trim() || profile?.zaloName?.trim() || uid;
-          } catch { /* ignore */ }
+          const displayName = await resolveUserDisplayName(api, uid, uid);
 
           const text = `🔔 <b>${escapeHtml(displayName)}</b> (<code>${uid}</code>) muốn tham gia nhóm.\n\nTổng đang chờ duyệt: ${totalPending}`;
           await tg.sendMessage(
@@ -1888,21 +1920,7 @@ ${escapeHtml(photoCaption)}`
       const fromUid = data?.fromUid;
       if (!fromUid) return;
 
-      // Resolve display name via getUserInfo (API returns key as "uid_0")
-      let displayName = fromUid;
-      try {
-        const resp = await api.getUserInfo(fromUid) as {
-          changed_profiles?: Record<string, { displayName?: string; zaloName?: string }>;
-          unchanged_profiles?: Record<string, { displayName?: string; zaloName?: string }>;
-        };
-        const uidKey = fromUid.includes('_') ? fromUid : `${fromUid}_0`;
-        const profile =
-          resp?.changed_profiles?.[uidKey] ??
-          resp?.changed_profiles?.[fromUid] ??
-          resp?.unchanged_profiles?.[uidKey] ??
-          resp?.unchanged_profiles?.[fromUid];
-        displayName = profile?.displayName?.trim() || profile?.zaloName?.trim() || fromUid;
-      } catch { /* use uid as fallback */ }
+      const displayName = await resolveUserDisplayName(api, fromUid, fromUid);
 
       const msgText = data?.message?.trim();
 
