@@ -3,7 +3,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-/** Root của project (src/../) */
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 
 function requireEnv(key: string): string {
