@@ -14,6 +14,7 @@ Cầu nối tin nhắn hai chiều giữa **Zalo** và **Telegram**, triển kha
 - [Tính năng](#tính-năng)
 - [Yêu cầu](#yêu-cầu)
 - [Cài đặt](#cài-đặt)
+- [Quick Start — macOS](#quick-start--macos)
 - [Cấu hình](#cấu-hình)
 - [Chạy ứng dụng](#chạy-ứng-dụng)
 - [Xác thực](#xác-thực)
@@ -149,6 +150,56 @@ cd zalo-tg
 npm install
 cp .env.example .env
 ```
+
+---
+
+## Quick Start — macOS
+
+Thư mục [`quick-start-script/`](quick-start-script/) cung cấp hai script sẵn dùng để khởi chạy bridge trên macOS mà không cần mở Terminal.
+
+### Cách A — Double-click file `.command`
+
+Cách đơn giản nhất. Double-click `zalo-bot-onefile.command` để hiện menu điều khiển với 5 lựa chọn: **Bật bot**, **Tắt bot**, **Xem trạng thái**, **Mở log**, **Hướng dẫn**.
+
+```bash
+# Sao chép vào Applications và cấp quyền thực thi
+cp quick-start-script/zalo-bot-onefile.command /Applications/
+chmod +x /Applications/zalo-bot-onefile.command
+```
+
+Lần đầu mở: chuột phải → **Open** để bỏ qua cảnh báo Gatekeeper. Những lần sau double-click bình thường.
+
+Xem hướng dẫn chi tiết tại [`HDSD file command.md`](quick-start-script/HDSD%20file%20command.md).
+
+### Cách B — App Automator
+
+Biến `zalo-bot-control.sh` thành file `.app` trong `/Applications`, có thể mở từ Spotlight hoặc Dock.
+
+1. Mở **Automator** → New Document → **Application**.
+2. Thêm action **Run Shell Script** (shell: `/bin/bash`).
+3. Dán toàn bộ nội dung file [`zalo-bot-control.sh`](quick-start-script/zalo-bot-control.sh).
+4. Lưu với tên `Zalo Bot Control` vào `/Applications`.
+
+Xem hướng dẫn từng bước tại [`HDSD file automation.md`](quick-start-script/HDSD%20file%20automation.md).
+
+### Luồng chạy khi chọn "Bật bot"
+
+Cả hai cách đều thực hiện cùng một trình tự:
+
+| Bước | Thao tác |
+|---|---|
+| 1 | `git checkout dev` |
+| 2 | `npm run build` |
+| 3 | Khởi chạy `run-bot-api.sh` nền |
+| 4 | Chờ tối đa 30 giây cho cổng `127.0.0.1:8081` mở |
+| 5 | `exec node dist/index.js` |
+
+Một **macOS LaunchAgent** (`com.edwardfranklin.zalo-bot`) được đăng ký để bot tự khởi động lại sau mỗi lần đăng nhập máy.
+
+Log được ghi vào `~/Library/Logs/zalo-bot-control/`.
+
+> [!IMPORTANT]
+> Nếu bridge đang kết nối tới Telegram Bot API tại `http://localhost:8081`, hãy đổi trong `.env` thành `TG_LOCAL_SERVER=http://127.0.0.1:8081` để tránh lỗi `ECONNREFUSED` do lệch IPv4/IPv6.
 
 ---
 

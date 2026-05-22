@@ -44,6 +44,7 @@
 - [Group and Topic Lifecycle](#-group-and-topic-lifecycle)
 - [Requirements](#-requirements)
 - [Installation](#-installation)
+- [Quick Start — macOS](#-quick-start--macos)
 - [Configuration](#-configuration)
 - [Running the Bridge](#-running-the-bridge)
 - [Zalo Authentication](#-zalo-authentication)
@@ -357,6 +358,56 @@ cp .env.example .env
 ```
 
 After installing dependencies, configure the environment variables in `.env` before starting the bridge.
+
+---
+
+## 🚀 Quick Start — macOS
+
+Two ready-to-use scripts are provided in the [`quick-start-script/`](quick-start-script/) directory for launching the bridge on macOS without opening a terminal.
+
+### Option A — Double-click `.command` file
+
+The simplest approach. Double-click `zalo-bot-onefile.command` to open a menu with five actions: **Bật bot**, **Tắt bot**, **Xem trạng thái**, **Mở log**, and **Hướng dẫn**.
+
+```bash
+# Copy to Applications and grant execute permission
+cp quick-start-script/zalo-bot-onefile.command /Applications/
+chmod +x /Applications/zalo-bot-onefile.command
+```
+
+On first launch, right-click → **Open** to bypass Gatekeeper. Subsequent launches are a normal double-click.
+
+See [`HDSD file command.md`](quick-start-script/HDSD%20file%20command.md) for the full walkthrough.
+
+### Option B — Automator application
+
+Converts `zalo-bot-control.sh` into a `.app` bundle stored in `/Applications`, launchable from Spotlight or the Dock.
+
+1. Open **Automator** → New Document → **Application**.
+2. Add a **Run Shell Script** action (shell: `/bin/bash`).
+3. Paste the contents of [`zalo-bot-control.sh`](quick-start-script/zalo-bot-control.sh).
+4. Save as `Zalo Bot Control` to `/Applications`.
+
+See [`HDSD file automation.md`](quick-start-script/HDSD%20file%20automation.md) for step-by-step instructions.
+
+### What the scripts do
+
+Both options perform the same startup sequence when **Bật bot** is selected:
+
+| Step | Action |
+|---|---|
+| 1 | `git checkout dev` |
+| 2 | `npm run build` |
+| 3 | Start `run-bot-api.sh` in the background |
+| 4 | Wait up to 30 s for `127.0.0.1:8081` to become available |
+| 5 | `exec node dist/index.js` |
+
+A **macOS LaunchAgent** (`com.edwardfranklin.zalo-bot`) is registered so the bridge restarts automatically after every login.
+
+Logs are written to `~/Library/Logs/zalo-bot-control/`.
+
+> [!IMPORTANT]
+> If the bridge connects to Telegram Bot API at `http://localhost:8081`, change the value in `.env` to `TG_LOCAL_SERVER=http://127.0.0.1:8081` to avoid IPv4/IPv6 resolution mismatches that cause `ECONNREFUSED` errors.
 
 ---
 
