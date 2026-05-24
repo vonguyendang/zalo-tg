@@ -37,6 +37,12 @@ export const config = {
   zalo: {
     credentialsPath: resolvePath(process.env.ZALO_CREDENTIALS_PATH, 'credentials.json'),
     skipMutedGroups: envFlag('ZALO_SKIP_MUTED_GROUPS'),
+    /** Số tin nhắn lịch sử tối đa mỗi lần sync (0 = tắt). Default: 1000 */
+    historySyncCount: Number(process.env.ZALO_HISTORY_SYNC_COUNT ?? '1000'),
+    /** Delay (ms) giữa mỗi tin khi sync lịch sử. Default: 3000ms */
+    historySyncDelayMs: Number(process.env.ZALO_HISTORY_SYNC_DELAY_MS ?? '3000'),
+    /** Tự động sync lịch sử khi tạo topic nhóm mới. Default: false */
+    historyAutoSync: envFlag('ZALO_HISTORY_AUTO_SYNC'),
   },
   dataDir: resolvePath(process.env.DATA_DIR, 'data'),
 } as const;
