@@ -1,6 +1,6 @@
 import { Zalo, LoginQRCallbackEventType } from 'zca-js';
 import type { LoginQRCallback } from 'zca-js';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, statSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { imageSizeFromFile } from 'image-size/fromFile';
@@ -151,6 +151,41 @@ export function resetZaloApi(): void {
   _api = null;
 }
 
+/** Delete stale credentials file so the next boot can do a fresh QR login. */
+export function clearCredentials(): void {
+  try {
+    if (existsSync(config.zalo.credentialsPath)) {
+      unlinkSync(config.zalo.credentialsPath);
+      console.log('[Zalo] Đã xoá credentials cũ (session hết hạn).');
+    }
+  } catch (err) {
+    console.warn('[Zalo] Không thể xoá credentials cũ:', err);
+  }
+}
+
+/** Sentinel error thrown when saved credentials are stale — caller should trigger QR re-login. */
+export class StaleCredentialsError extends Error {
+  constructor(cause: unknown) {
+    super('Credentials Zalo đã hết hạn — cần đăng nhập lại qua QR.');
+    this.name = 'StaleCredentialsError';
+    this.cause = cause;
+  }
+}
+
+/** Returns true for errors that indicate an expired/invalid Zalo session. */
+function isAuthError(err: unknown): boolean {
+  if (err && typeof err === 'object') {
+    const e = err as { code?: unknown; message?: string };
+    // code 600 = zpw_sek bị thiếu/không đúng
+    if (e.code === 600) return true;
+    if (typeof e.message === 'string') {
+      const m = e.message;
+      if (m.includes('Đăng nhập thất bại') || m.includes('zpw_sek') || m.includes('loginCookie')) return true;
+    }
+  }
+  return false;
+}
+
 export async function getZaloApi(): Promise<ZaloAPI> {
   if (_api) return _api;
 
@@ -165,7 +200,17 @@ export async function getZaloApi(): Promise<ZaloAPI> {
   ) as { imei: string; cookie: unknown; userAgent: string };
 
   console.log('[Zalo] Đang đăng nhập bằng credentials đã lưu...');
-  _api = (await zalo.login(credentials as Parameters<typeof zalo.login>[0])) as ZaloAPI;
+  try {
+    _api = (await zalo.login(credentials as Parameters<typeof zalo.login>[0])) as ZaloAPI;
+  } catch (err) {
+    if (isAuthError(err)) {
+      console.warn('[Zalo] Session hết hạn (auth error), đang xoá credentials cũ...');
+      clearCredentials();
+      _api = null;
+      throw new StaleCredentialsError(err);
+    }
+    throw err;
+  }
   console.log('[Zalo] Đăng nhập thành công ✓');
 
   return _api as ZaloAPI;
