@@ -25,6 +25,8 @@ npm-debug.log*
 
 # Editor
 .vscode/
+.idx/
 .idea/
 logs/
 app-session.json
+.mcp.json
