@@ -154,6 +154,7 @@ async function main(): Promise<void> {
     { command: 'friendrequests', description: 'Xem lời mời kết bạn & lời mời nhóm' },
     { command: 'topic',          description: 'Quản lý topic: list / info / delete' },
     { command: 'recall',         description: 'Thu hồi tin nhắn (reply vào tin đã gửi)' },
+    { command: 'history',        description: 'Đồng bộ lịch sử tin nhắn nhóm vào topic' },
     { command: 'admin',          description: 'Admin panel: trạng thái, cache, tra mapping' },
     { command: 'status',         description: 'Xem trạng thái bridge: uptime, số topic, Zalo' },
     { command: 'update',         description: 'Kiểm tra bản cập nhật mới' },
@@ -177,6 +178,13 @@ async function main(): Promise<void> {
       .then(async (api) => {
         setZaloApi(api);   // ← inject into Telegram handler so TG→Zalo works
         await startZalo(api);
+        
+        // Gửi thông báo khởi động lên Telegram
+        await tgBot.telegram.sendMessage(
+          config.telegram.groupId,
+          '🚀 <b>Zalo ↔ Telegram Bridge</b> đã khởi động và kết nối thành công!',
+          { parse_mode: 'HTML' }
+        ).catch(() => undefined);
       })
       .catch(async (err: unknown) => {
         if (err instanceof StaleCredentialsError) {
@@ -248,6 +256,14 @@ async function main(): Promise<void> {
   // ── Graceful shutdown ──────────────────────────────────────────────────────
   const shutdown = async (signal: string) => {
     console.log(`\n[Boot] Received ${signal}, shutting down...`);
+    
+    // Gửi thông báo trước khi tắt (catch lỗi để không block quá trình tắt nếu rớt mạng)
+    await tgBot.telegram.sendMessage(
+      config.telegram.groupId,
+      '🛑 <b>Zalo ↔ Telegram Bridge</b> đã tắt (ngắt kết nối).',
+      { parse_mode: 'HTML' }
+    ).catch(() => undefined);
+
     try { const api = await getZaloApi(); api.listener.stop(); } catch { /* ignore */ }
     await tgBot.stop(signal);
     // Wait for debounced persistence (msgStore 1000ms, userCache 2000ms) to flush

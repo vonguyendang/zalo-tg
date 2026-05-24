@@ -14,6 +14,7 @@ import { applyZaloMarkupHtml, formatGroupMsgHtml, formatGroupMsg, groupCaption, 
 import type { ZaloStyle } from '../utils/format.js';
 import { msgStore, userCache, pollStore, sentMsgStore, zaloAlbumStore, reactionEchoStore, reactionSummaryStore, reactionEventDedupeStore, aliasCache, friendsCache, recentlyRecalledMsgIds, type ZaloQuoteData } from '../store.js';
 import { tgQueue } from '../utils/tgQueue.js';
+import { syncGroupHistory } from './historySync.js';
 
 // Proxy that routes every tg.* call through the rate-limit queue
 // so 429 errors are auto-retried instead of crashing the process.
@@ -407,6 +408,7 @@ async function maybeRenameExistingDmTopic(
 }
 
 async function getOrCreateTopic(
+  api: ZaloAPI,
   zaloId: string,
   type: 0 | 1,
   displayName: string,
@@ -425,7 +427,7 @@ async function getOrCreateTopic(
   const inFlight = _pendingTopics.get(pendingKey);
   if (inFlight) return inFlight;
 
-  const promise = _doCreateTopic(zaloId, type, displayName, avatarUrl)
+  const promise = _doCreateTopic(api, zaloId, type, displayName, avatarUrl)
     .finally(() => _pendingTopics.delete(pendingKey));
   _pendingTopics.set(pendingKey, promise);
   return promise;
@@ -445,6 +447,7 @@ function isTopicDeletedError(err: unknown): boolean {
  * remove stale mapping, recreate the topic, and retry once.
  */
 async function sendWithTopicRecovery<T>(
+  api: ZaloAPI,
   zaloId: string,
   type: 0 | 1,
   displayName: string,
@@ -458,12 +461,13 @@ async function sendWithTopicRecovery<T>(
     if (!isTopicDeletedError(err)) throw err;
     console.warn(`[Zalo→TG] Topic ${currentTopicId} deleted — removing mapping and recreating for ${zaloId}`);
     store.remove(currentTopicId);
-    const newTopicId = await getOrCreateTopic(zaloId, type, displayName, avatarUrl, true);
+    const newTopicId = await getOrCreateTopic(api, zaloId, type, displayName, avatarUrl, true);
     return sendFn(newTopicId);
   }
 }
 
 async function _doCreateTopic(
+  api: ZaloAPI,
   zaloId: string,
   type: 0 | 1,
   displayName: string,
@@ -520,6 +524,14 @@ async function _doCreateTopic(
     } catch (avatarErr) {
       console.warn(`[Zalo→TG] Failed to pin group avatar for ${displayName}:`, avatarErr);
     }
+  }
+
+  // Auto-sync group history khi tạo topic mới (nếu được bật)
+  if (type === 1 /* Group */ && config.zalo.historyAutoSync) {
+    // Chạy trong background, không block tin nhắn đang đến
+    void syncGroupHistory(api, zaloId, topicId).catch(err =>
+      console.warn(`[Zalo→TG] Auto history sync failed for group=${zaloId}:`, err),
+    );
   }
 
   return topicId;
@@ -747,7 +759,7 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
         userCache.save(senderUid, bridgeSenderName);
       }
 
-      const topicId = await getOrCreateTopic(zaloId, type, displayName, groupAvatarUrl);
+      const topicId = await getOrCreateTopic(api, zaloId, type, displayName, groupAvatarUrl);
 
       // Resolve Telegram reply target from incoming Zalo quote (if any)
       let tgReplyMsgId: number | undefined;

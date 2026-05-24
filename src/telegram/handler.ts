@@ -491,6 +491,73 @@ export function setupTelegramHandler(
     );
   });
 
+  // /history — đồng bộ lịch sử tin nhắn nhóm vào topic hiện tại.
+  // Cú pháp: /history [số_tin] (ví dụ: /history 30)
+  // Chỉ hoạt động trong topic nhóm Zalo (không hỗ trợ DM).
+  tgBot.command('history', async (ctx) => {
+    if (ctx.chat.id !== config.telegram.groupId) return;
+    const topicId = 'message_thread_id' in ctx.message
+      ? (ctx.message.message_thread_id as number | undefined)
+      : undefined;
+    const replyOpts = topicId ? { message_thread_id: topicId } : {};
+
+    if (!topicId) {
+      await ctx.telegram.sendMessage(
+        config.telegram.groupId,
+        '⚠️ Hãy gửi <code>/history</code> trong topic nhóm Zalo cần sync lịch sử.',
+        { ...replyOpts, parse_mode: 'HTML' },
+      );
+      return;
+    }
+
+    const entry = store.getEntryByTopic(topicId);
+    if (!entry || entry.type !== 1) {
+      await ctx.telegram.sendMessage(
+        config.telegram.groupId,
+        '❌ Lệnh này chỉ dùng được trong topic <b>nhóm</b> Zalo (không hỗ trợ chat riêng).',
+        { ...replyOpts, parse_mode: 'HTML' },
+      );
+      return;
+    }
+
+    if (!currentApi) {
+      await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Zalo chưa kết nối.', replyOpts);
+      return;
+    }
+
+    // Parse count từ tham số (ví dụ /history 30)
+    const rawArg = (ctx.message.text ?? '').split(/\s+/)[1];
+    const requestedCount = rawArg ? parseInt(rawArg, 10) : undefined;
+    const count = (requestedCount && !isNaN(requestedCount) && requestedCount > 0)
+      ? Math.min(requestedCount, 200)   // tối đa 200 để tránh spam
+      : config.zalo.historySyncCount;
+
+    const delayMs = config.zalo.historySyncDelayMs;
+
+    await ctx.telegram.sendMessage(
+      config.telegram.groupId,
+      `🔄 Đang đồng bộ tối đa <b>${count}</b> tin nhắn lịch sử của <b>${escapeHtml(entry.name)}</b>…\n<i>(delay ${delayMs}ms/tin để tránh bị Zalo giới hạn)</i>`,
+      { ...replyOpts, parse_mode: 'HTML' },
+    );
+
+    try {
+      const { syncGroupHistory } = await import('../zalo/historySync.js');
+      const forwarded = await syncGroupHistory(currentApi, entry.zaloId, topicId, { count, delayMs });
+      await ctx.telegram.sendMessage(
+        config.telegram.groupId,
+        `✅ Đã đồng bộ <b>${forwarded}</b> tin nhắn lịch sử.`,
+        { ...replyOpts, parse_mode: 'HTML' },
+      );
+    } catch (err) {
+      console.error('[/history] syncGroupHistory error:', err);
+      await ctx.telegram.sendMessage(
+        config.telegram.groupId,
+        `❌ Lỗi khi đồng bộ lịch sử: ${escapeHtml(String(err))}`,
+        { ...replyOpts, parse_mode: 'HTML' },
+      ).catch(() => undefined);
+    }
+  });
+
   // /call — trigger a personal call request for current mapped DM topic.
   // Usage in a personal topic: /call or /call video
   tgBot.command('call', async (ctx) => {
