@@ -1,4 +1,4 @@
-import { getZaloApi, resetZaloApi } from './zalo/client.js';
+import { getZaloApi, resetZaloApi, StaleCredentialsError, triggerQRLogin } from './zalo/client.js';
 import { CloseReason, ThreadType } from 'zca-js';
 import { setupZaloHandler } from './zalo/handler.js';
 import { tgBot, syncTelegramCommands } from './telegram/bot.js';
@@ -171,13 +171,67 @@ async function main(): Promise<void> {
 
     // ── Attempt Zalo login in background ────────────────────────────────────
     // If credentials.json exists → connects automatically and updates currentApi.
-    // If not → notifies the user to run /login.
+    // If session is expired (StaleCredentialsError) → auto QR login via Telegram.
+    // If credentials.json missing → notifies user to run /login.
     getZaloApi()
       .then(async (api) => {
         setZaloApi(api);   // ← inject into Telegram handler so TG→Zalo works
         await startZalo(api);
       })
-      .catch((err: unknown) => {
+      .catch(async (err: unknown) => {
+        if (err instanceof StaleCredentialsError) {
+          console.warn('[Boot] Zalo auto-login failed: session hết hạn. Tự động mở QR login...');
+          tgBot.telegram
+            .sendMessage(
+              config.telegram.groupId,
+              '🔄 Session Zalo đã hết hạn. Đang tự động tạo mã QR để đăng nhập lại...',
+            )
+            .catch(() => undefined);
+          // Trigger auto QR login
+          try {
+            const { createReadStream } = await import('fs');
+            const newApi = await triggerQRLogin({
+              onQRReady: async (imagePath) => {
+                await tgBot.telegram.sendPhoto(
+                  config.telegram.groupId,
+                  { source: createReadStream(imagePath) },
+                  {
+                    caption: '📱 Mở ứng dụng <b>Zalo</b> → Cài đặt → Quét mã QR để đăng nhập lại.',
+                    parse_mode: 'HTML',
+                  },
+                ).catch(() => undefined);
+              },
+              onExpired: async () => {
+                tgBot.telegram.sendMessage(config.telegram.groupId, '⏰ QR hết hạn, đang tạo mã mới...').catch(() => undefined);
+              },
+              onScanned: async (displayName) => {
+                tgBot.telegram.sendMessage(
+                  config.telegram.groupId,
+                  `✅ Đã quét! Chờ xác nhận từ <b>${displayName}</b>...`,
+                  { parse_mode: 'HTML' },
+                ).catch(() => undefined);
+              },
+              onDeclined: async () => {
+                tgBot.telegram.sendMessage(config.telegram.groupId, '❌ Đăng nhập bị từ chối trên điện thoại.').catch(() => undefined);
+              },
+              onSuccess: async () => {
+                tgBot.telegram.sendMessage(config.telegram.groupId, '🎉 Đăng nhập Zalo thành công! Bridge đang hoạt động.').catch(() => undefined);
+              },
+            });
+            setZaloApi(newApi);
+            await startZalo(newApi);
+          } catch (qrErr: unknown) {
+            console.error('[Boot] Auto QR login failed:', qrErr);
+            tgBot.telegram
+              .sendMessage(
+                config.telegram.groupId,
+                '❌ Đăng nhập QR tự động thất bại. Hãy dùng <b>/login</b> để thử lại.',
+                { parse_mode: 'HTML' },
+              )
+              .catch(() => undefined);
+          }
+          return;
+        }
         console.warn('[Boot] Zalo auto-login failed:', err);
         tgBot.telegram
           .sendMessage(
