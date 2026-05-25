@@ -150,6 +150,18 @@ stop_bot() {
   osascript -e 'display dialog "Đã tắt bot." buttons {"OK"} default button "OK" with title "Zalo Bot Control"'
 }
 
+restart_bot() {
+  launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
+  /usr/bin/pkill -f 'node dist/index.js' >/dev/null 2>&1 || true
+  /usr/bin/pkill telegram-bot-api >/dev/null 2>&1 || true
+  clean_old_logs
+  write_run_script
+  write_plist
+  launchctl bootstrap "gui/$(id -u)" "$PLIST"
+  launchctl kickstart -k "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
+  osascript -e 'display dialog "Đã khởi động lại bot thành công." buttons {"OK"} default button "OK" with title "Zalo Bot Control"'
+}
+
 show_status() {
   if is_loaded; then
     STATUS="ĐANG BẬT"
@@ -212,18 +224,19 @@ show_help() {
   osascript <<OSA
 display dialog "Cách dùng:
 1. Chọn Bật bot để cài và chạy.
-2. Chọn Xem trạng thái để kiểm tra.
-3. Chọn Mở log để xem lỗi.
-4. Chọn Tắt bot để dừng.
-5. Chọn Cấu hình xóa log để đặt số ngày giữ log.
-6. Chọn Xóa log ngay để dọn log cũ thủ công." buttons {"OK"} default button "OK" with title "Zalo Bot Control"
+2. Chọn Khởi động lại bot để nạp lại code mới / reset bot.
+3. Chọn Xem trạng thái để kiểm tra.
+4. Chọn Mở log để xem lỗi.
+5. Chọn Tắt bot để dừng.
+6. Chọn Cấu hình xóa log để đặt số ngày giữ log.
+7. Chọn Xóa log ngay để dọn log cũ thủ công." buttons {"OK"} default button "OK" with title "Zalo Bot Control"
 OSA
 }
 
 # ── Menu chính ──────────────────────────────────────────────────────────────────
 
 CHOICE=$(osascript <<'OSA'
-set picked to choose from list {"Bật bot", "Tắt bot", "Xem trạng thái", "Mở log", "Cấu hình xóa log", "Xóa log ngay", "Hướng dẫn"} with prompt "Chọn thao tác:" with title "Zalo Bot Control" default items {"Bật bot"} OK button name "Chọn" cancel button name "Thoát"
+set picked to choose from list {"Bật bot", "Khởi động lại bot", "Tắt bot", "Xem trạng thái", "Mở log", "Cấu hình xóa log", "Xóa log ngay", "Hướng dẫn"} with prompt "Chọn thao tác:" with title "Zalo Bot Control" default items {"Bật bot"} OK button name "Chọn" cancel button name "Thoát"
 if picked is false then
 	return "Thoát"
 else
@@ -234,6 +247,7 @@ OSA
 
 case "$CHOICE" in
   "Bật bot")           start_bot ;;
+  "Khởi động lại bot") restart_bot ;;
   "Tắt bot")           stop_bot ;;
   "Xem trạng thái")    show_status ;;
   "Mở log")            open_logs ;;
