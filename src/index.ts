@@ -99,9 +99,11 @@ async function startZalo(
       console.warn(`[Boot] Zalo disconnected: duplicate connection (code=${code}, reason=${reason})`);
       tgBot.telegram.sendMessage(
         config.telegram.groupId,
-        '⚠️ Zalo bị ngắt do đăng nhập trùng phiên (duplicate connection). Đóng phiên Zalo Web/PC khác rồi dùng <b>/login</b> nếu cần.',
+        '⚠️ Zalo bị ngắt do đăng nhập trùng phiên (Duplicate Connection). Có thể do lỗi máy chủ Zalo giữ session cũ (bóng ma).\n' +
+        'Bridge sẽ tự động kết nối lại sau 10 giây... Nếu vẫn lỗi, hãy dùng lệnh <b>/reconnect</b> hoặc <b>/login</b>.',
         { parse_mode: 'HTML' },
       ).catch(() => undefined);
+      scheduleReconnect(10_000);
       return;
     }
     if (code === CloseReason.KickConnection) {
@@ -145,6 +147,7 @@ async function main(): Promise<void> {
     { command: 'loginweb',       description: 'Đăng nhập Zalo QR (giống /login)' },
     { command: 'loginapp',       description: 'Đăng nhập Zalo qua PC App API' },
     { command: 'search',         description: 'Tìm bạn bè / nhóm Zalo để tạo topic' },
+    { command: 'reconnect',      description: 'Kết nối lại Zalo bằng session cũ (khi bị ngắt)' },
     { command: 'group_info',     description: 'Xem thông tin & thành viên nhóm Zalo hiện tại' },
     { command: 'group_infoall',  description: 'Xem toàn bộ thành viên nhóm Zalo hiện tại' },
     { command: 'addfriend',      description: 'Tìm & kết bạn Zalo theo số điện thoại' },
@@ -159,6 +162,21 @@ async function main(): Promise<void> {
     { command: 'status',         description: 'Xem trạng thái bridge: uptime, số topic, Zalo' },
     { command: 'update',         description: 'Kiểm tra bản cập nhật mới' },
   ]).catch(() => undefined);
+
+  tgBot.command('reconnect', async (ctx) => {
+    if (ctx.chat.id !== config.telegram.groupId && ctx.chat.type !== 'private') return;
+    await ctx.reply('🔄 Đang thử kết nối lại Zalo bằng session cũ...');
+    try {
+      resetZaloApi();
+      const newApi = await getZaloApi();
+      _setZaloApi?.(newApi);
+      await startZalo(newApi, true);
+      await ctx.reply('✅ Đã kết nối lại Zalo thành công!');
+    } catch (err) {
+      console.error('[/reconnect] Failed:', err);
+      await ctx.reply(`❌ Kết nối lại thất bại: ${String(err)}\nNếu session đã hết hạn, hãy dùng /login để quét mã mới.`);
+    }
+  });
 
   // ── Start Telegram bot so /login can be received immediately ───────────────
   // NOTE: tgBot.launch() runs the polling loop forever, so we must NOT await it.
