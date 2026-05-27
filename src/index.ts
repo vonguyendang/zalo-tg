@@ -6,6 +6,7 @@ import { setupTelegramHandler } from './telegram/handler.js';
 import { config } from './config.js';
 import { startUpdateChecker } from './updater.js';
 import { store } from './store.js';
+import { syncGroupHistory } from './zalo/historySync.js';
 
 // ── Global safety net — prevent unhandled rejections from crashing ────────────
 process.on('unhandledRejection', (reason) => {
@@ -56,6 +57,37 @@ async function startZalo(
         api.listener.requestOldReactions(ThreadType.User);
         api.listener.requestOldReactions(ThreadType.Group);
         console.log('[Boot] Requested catch-up sync after reconnect');
+
+        // Đồng bộ tin nhắn bị lỡ từ các nhóm (chỉ hỗ trợ group topics)
+        void (async () => {
+          const groups = store.all().filter(e => e.type === 1);
+          if (groups.length === 0) return;
+          
+          console.log(`[Boot] Bắt đầu đồng bộ tin nhắn lỡ cho ${groups.length} nhóm sau khi kết nối lại...`);
+          let totalSynced = 0;
+          for (const g of groups) {
+            try {
+              // Lấy khoảng 30 tin nhắn gần nhất để sync, những tin đã có trong msgStore sẽ tự bị loại bỏ
+              const n = await syncGroupHistory(api, g.zaloId, g.topicId, { 
+                count: 30, 
+                delayMs: config.zalo.historySyncDelayMs || 2000 
+              });
+              totalSynced += n;
+              // Ngủ 3 giây giữa mỗi nhóm để tránh Zalo rate-limit / ban (error 221)
+              await new Promise(r => setTimeout(r, 3000));
+            } catch (err) {
+              console.warn(`[Boot] Lỗi đồng bộ tin lỡ cho nhóm ${g.zaloId}:`, err);
+            }
+          }
+          console.log(`[Boot] Hoàn thành đồng bộ tin lỡ. Tổng cộng: ${totalSynced} tin.`);
+          if (totalSynced > 0) {
+            tgBot.telegram.sendMessage(
+              config.telegram.groupId, 
+              `🔄 <b>Zalo đã kết nối lại.</b>\nĐã đồng bộ thành công ${totalSynced} tin nhắn nhóm bị lỡ trong thời gian mất kết nối.`,
+              { parse_mode: 'HTML' }
+            ).catch(() => undefined);
+          }
+        })();
       } catch (err) {
         console.warn('[Boot] Failed to request catch-up sync:', err);
       }
