@@ -381,19 +381,35 @@ export async function syncGroupHistory(
     return 0;
   }
 
-  // Zalo trả về tin mới nhất đầu tiên → reverse để forward theo thứ tự cũ → mới
-  const ordered = [...msgs].reverse();
+  // Sắp xếp tin nhắn theo thứ tự thời gian tăng dần (cũ nhất -> mới nhất)
+  // và loại bỏ các tin trùng lặp (nếu API trả về trùng)
+  const uniqueMsgs = new Map<string, typeof msgs[0]>();
+  for (const m of msgs) {
+    if (m.data?.msgId) uniqueMsgs.set(m.data.msgId, m);
+  }
+  const ordered = Array.from(uniqueMsgs.values()).sort((a, b) => Number(a.data?.ts || 0) - Number(b.data?.ts || 0));
 
-  // Lọc tin đã có trong msgStore (đã được bridge forward rồi)
+  // Lọc tin đã có trong msgStore (đã được bridge forward rồi) hoặc đang in-flight
   const toSync = ordered.filter(m => {
-    const id = m.data?.msgId;
-    if (!id) return false;
-    return msgStore.getTgMsgId(id) === undefined;
+    const ids = [m.data?.msgId, m.data?.realMsgId, m.data?.cliMsgId].filter(Boolean) as string[];
+    if (ids.length === 0) return false;
+    // Nếu có bất kỳ ID nào đã lưu hoặc đang xử lý, bỏ qua tin này
+    return !ids.some(id => msgStore.getTgMsgId(id) !== undefined || msgStore.isInFlight(id));
   });
 
   if (toSync.length === 0) {
     console.log(`[HistorySync] All ${msgs.length} messages already synced for group=${groupId}`);
     return 0;
+  }
+
+  // Đánh dấu các tin sẽ sync là in-flight để tránh race condition (khi handler.ts nhận message đồng thời)
+  for (const m of toSync) {
+    const ids = [m.data?.msgId, m.data?.realMsgId, m.data?.cliMsgId].filter(Boolean) as string[];
+    for (const id of ids) msgStore.markInFlight(id);
+    // Tự động clear in-flight sau 60s phòng hờ lỗi crash khi gửi, để lần reconnect sau còn sync lại được
+    setTimeout(() => {
+      for (const id of ids) msgStore.unmarkInFlight(id);
+    }, 60_000);
   }
 
   // Gửi header phân cách vào Telegram

@@ -577,13 +577,6 @@ function buildScoreText(header: string, options: Pick<PollOptions, 'content' | '
 /** Track which groups already had their member cache populated this session. */
 const _memberCacheLoaded = new Set<string>();
 
-/**
- * In-flight dedup set — holds msgIds that are currently being processed.
- * Prevents race condition where multiple reaction re-emits arrive concurrently
- * before any of them is saved to msgStore, causing all to pass the msgStore check.
- */
-const _inFlightMsgIds = new Set<string>();
-
 export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
   // Pre-populate userCache for all existing group topics on startup.
   // Stagger calls by 2 s each to avoid triggering the rate limiter (code 221).
@@ -679,13 +672,13 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
       // (handles concurrent re-emits that arrive before any is saved to msgStore).
       const _primaryMsgId = msg.data.msgId;
       if (_primaryMsgId) {
-        if (msgStore.getTgMsgId(_primaryMsgId) !== undefined || _inFlightMsgIds.has(_primaryMsgId)) {
+        if (msgStore.getTgMsgId(_primaryMsgId) !== undefined || msgStore.isInFlight(_primaryMsgId)) {
           console.log(`[Zalo→TG] Skip duplicate/reaction re-emit msgId=${_primaryMsgId}`);
           return;
         }
-        _inFlightMsgIds.add(_primaryMsgId);
+        msgStore.markInFlight(_primaryMsgId);
         // Auto-remove from in-flight after 10 s (msgStore.save will be the permanent record)
-        setTimeout(() => _inFlightMsgIds.delete(_primaryMsgId), 10_000);
+        setTimeout(() => msgStore.unmarkInFlight(_primaryMsgId), 10_000);
       }
 
       const zaloId = msg.threadId;
