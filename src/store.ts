@@ -266,6 +266,9 @@ const _msgKeyOrder: string[] = [];
 /** Số lượng zaloMsgId trỏ đến mỗi tgMsgId (để tránh xoá quote sớm) */
 const _tgRefCount = new Map<number, number>();
 
+/** In-flight deduplication set (used to prevent duplicate concurrent forwarding) */
+const _inFlightMsgIds = new Set<string>();
+
 function _evictOne(): void {
   const old = _msgKeyOrder.shift();
   if (!old) return;
@@ -300,6 +303,21 @@ function _evictOne(): void {
 }
 
 export const msgStore = {
+  /** Check if a Zalo message is currently being forwarded (in-flight). */
+  isInFlight(zaloMsgId: string): boolean {
+    return zaloMsgId ? _inFlightMsgIds.has(zaloMsgId) : false;
+  },
+
+  /** Mark a Zalo message as currently being forwarded to prevent duplicates. */
+  markInFlight(zaloMsgId: string): void {
+    if (zaloMsgId && zaloMsgId !== '0') _inFlightMsgIds.add(zaloMsgId);
+  },
+
+  /** Unmark an in-flight Zalo message (e.g. if sending failed). */
+  unmarkInFlight(zaloMsgId: string): void {
+    if (zaloMsgId) _inFlightMsgIds.delete(zaloMsgId);
+  },
+
   /**
    * Save a bidirectional mapping after a Zalo message is forwarded to Telegram.
    * @param tgMsgId      The Telegram message_id of the forwarded message.
