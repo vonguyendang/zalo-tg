@@ -1,3 +1,4 @@
+import { setTelegramErrorReporter } from './log.js';
 import { getZaloApi, resetZaloApi, StaleCredentialsError, triggerQRLogin } from './zalo/client.js';
 import { CloseReason, ThreadType } from 'zca-js';
 import { setupZaloHandler } from './zalo/handler.js';
@@ -7,6 +8,30 @@ import { config } from './config.js';
 import { startUpdateChecker } from './updater.js';
 import { store } from './store.js';
 import { syncGroupHistory } from './zalo/historySync.js';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+import path from 'path';
+
+let _errorTopicId: number | null = null;
+async function getErrorTopicId(): Promise<number | undefined> {
+  if (_errorTopicId !== null) return _errorTopicId;
+  const _errorTopicFile = path.resolve(config.dataDir, 'error-topic.txt');
+  if (existsSync(_errorTopicFile)) {
+    const content = readFileSync(_errorTopicFile, 'utf8').trim();
+    if (content) {
+      _errorTopicId = Number(content);
+      return _errorTopicId;
+    }
+  }
+  
+  try {
+    const topic = await tgBot.telegram.createForumTopic(config.telegram.groupId, 'Error logs');
+    _errorTopicId = topic.message_thread_id;
+    writeFileSync(_errorTopicFile, String(_errorTopicId), 'utf8');
+    return _errorTopicId;
+  } catch (err) {
+    return undefined; // Might not be a forum group
+  }
+}
 
 // ── Global safety net — prevent unhandled rejections from crashing ────────────
 process.on('unhandledRejection', (reason) => {
@@ -215,6 +240,21 @@ async function main(): Promise<void> {
   // The second argument callback fires once getMe() + deleteWebhook() succeed.
   tgBot.launch({ allowedUpdates: ['message', 'callback_query', 'message_reaction', 'poll_answer', 'poll'] }, () => {
     console.log('[Boot] Telegram bot started ✓');
+
+    setTelegramErrorReporter((msg) => {
+      // fire and forget to avoid blocking
+      void (async () => {
+        try {
+          const tid = await getErrorTopicId();
+          await tgBot.telegram.sendMessage(config.telegram.groupId, `🚨 <b>Error Log:</b>\n<pre>${msg}</pre>`, {
+            message_thread_id: tid,
+            parse_mode: 'HTML'
+          });
+        } catch (e) {
+          // ignore
+        }
+      })();
+    });
 
     syncTelegramCommands()
       .then(() => console.log('[Boot] Telegram command menu synced ✓'))
