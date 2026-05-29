@@ -165,7 +165,7 @@ async function sendHistoryMsg(
     if (!body.trim() && typeof msg.data.content === 'object' && msg.data.content !== null) {
       body = JSON.stringify(msg.data.content);
     }
-    if (!body.trim()) return;
+    if (!body.trim()) return void saveTgMapping({ message_id: 0 });
 
     const mentions = msg.data.mentions;
 
@@ -221,7 +221,7 @@ async function sendHistoryMsg(
         if (p.hd) url = p.hd;
       } catch { /* ignore */ }
     }
-    if (!url) return;
+    if (!url) return void saveTgMapping({ message_id: 0 });
     const localPath = await downloadToTemp(url, `hist_photo_${Date.now()}.jpg`);
     try {
       const sent = await tg.sendPhoto(config.telegram.groupId, { source: createReadStream(localPath) }, tgOpts);
@@ -233,7 +233,7 @@ async function sendHistoryMsg(
   // ── 3. GIF ────────────────────────────────────────────────────────────────
   if (msgType === ZALO_MSG_TYPES.GIF) {
     const url = media.href;
-    if (!url) return;
+    if (!url) return void saveTgMapping({ message_id: 0 });
     const ext = path.extname(url.split('?')[0] ?? '').toLowerCase() || '.mp4';
     const localPath = await downloadToTemp(url, `hist_gif_${Date.now()}${ext}`);
     try {
@@ -247,7 +247,7 @@ async function sendHistoryMsg(
   if (msgType === ZALO_MSG_TYPES.FILE) {
     const url = media.href;
     const fileName = media.title ?? `hist_file_${Date.now()}`;
-    if (!url) return;
+    if (!url) return void saveTgMapping({ message_id: 0 });
     const localPath = await downloadToTemp(url, fileName);
     try {
       const sent = await tg.sendDocument(config.telegram.groupId, { source: createReadStream(localPath), filename: fileName }, tgOpts);
@@ -259,7 +259,7 @@ async function sendHistoryMsg(
   // ── 5. Video ──────────────────────────────────────────────────────────────
   if (msgType === ZALO_MSG_TYPES.VIDEO) {
     const url = media.href;
-    if (!url) return;
+    if (!url) return void saveTgMapping({ message_id: 0 });
     const fileName = media.title?.trim() || `hist_video_${Date.now()}.mp4`;
     const localPath = await downloadToTemp(url, fileName);
     try {
@@ -272,7 +272,7 @@ async function sendHistoryMsg(
   // ── 6. Voice ──────────────────────────────────────────────────────────────
   if (msgType === ZALO_MSG_TYPES.VOICE) {
     const url = media.href;
-    if (!url) return;
+    if (!url) return void saveTgMapping({ message_id: 0 });
     const ext = path.extname(url.split('?')[0] ?? '').toLowerCase() || '.m4a';
     const localPath = await downloadToTemp(url, `hist_voice_${Date.now()}${ext}`);
     try {
@@ -285,13 +285,13 @@ async function sendHistoryMsg(
   // ── 7. Sticker ────────────────────────────────────────────────────────────
   if (msgType === ZALO_MSG_TYPES.STICKER) {
     const stickerId = media.id;
-    if (!stickerId) return;
+    if (!stickerId) return void saveTgMapping({ message_id: 0 });
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const details: any[] = await api.getStickersDetail([stickerId]);
       const detail = details?.[0];
       const url: string | undefined = detail?.stickerWebpUrl ?? detail?.stickerUrl ?? detail?.stickerSpriteUrl;
-      if (!url) return;
+      if (!url) return void saveTgMapping({ message_id: 0 });
       const ext = path.extname(url.split('?')[0] ?? '').toLowerCase() || '.webp';
       const localPath = await downloadToTemp(url, `hist_sticker_${Date.now()}${ext}`);
       try {
@@ -325,7 +325,7 @@ async function sendHistoryMsg(
     }
     const href = media.href || '';
     const title = media.title || href;
-    if (!href) return;
+    if (!href) return void saveTgMapping({ message_id: 0 });
     const linkText = `${caption}\n<a href="${href}">${escapeHtml(title)}</a>`;
     const sent = await tg.sendMessage(config.telegram.groupId, linkText, {
       ...tgBase, parse_mode: 'HTML', link_preview_options: { is_disabled: false },
@@ -336,6 +336,7 @@ async function sendHistoryMsg(
 
   // ── Fallback: loại tin không xử lý được ──────────────────────────────────
   console.log(`[HistorySync] Skipping unsupported msgType="${msgType}" msgId=${msg.data.msgId}`);
+  saveTgMapping({ message_id: 0 });
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -406,20 +407,18 @@ export async function syncGroupHistory(
   for (const m of toSync) {
     const ids = [m.data?.msgId, m.data?.realMsgId, m.data?.cliMsgId].filter(Boolean) as string[];
     for (const id of ids) msgStore.markInFlight(id);
-    // Tự động clear in-flight sau 60s phòng hờ lỗi crash khi gửi, để lần reconnect sau còn sync lại được
-    setTimeout(() => {
-      for (const id of ids) msgStore.unmarkInFlight(id);
-    }, 60_000);
   }
 
   // Gửi header phân cách vào Telegram
   const headerCount = toSync.length;
+  let headerMsgId: number | undefined;
   try {
-    await tg.sendMessage(
+    const sent = await tg.sendMessage(
       config.telegram.groupId,
       `<i>───── 📜 Lịch sử: ${headerCount} tin nhắn ─────</i>`,
       { message_thread_id: topicId, parse_mode: 'HTML' },
     );
+    headerMsgId = sent.message_id;
   } catch { /* header not critical */ }
 
   let forwarded = 0;
@@ -431,7 +430,17 @@ export async function syncGroupHistory(
       forwarded++;
     } catch (err) {
       console.warn(`[HistorySync] Failed to forward msgId=${msg.data?.msgId}:`, err);
+    } finally {
+      const ids = [msg.data?.msgId, msg.data?.realMsgId, msg.data?.cliMsgId].filter(Boolean) as string[];
+      for (const id of ids) msgStore.unmarkInFlight(id);
     }
+  }
+
+  // Nếu không gửi thành công tin nào (có thể do lỗi mạng), xóa header đi để tránh spam rác
+  if (forwarded === 0 && headerMsgId) {
+    try {
+      await tg.deleteMessage(config.telegram.groupId, headerMsgId);
+    } catch { /* ignore */ }
   }
 
   console.log(`[HistorySync] Done: forwarded ${forwarded}/${toSync.length} messages for group=${groupId}`);
