@@ -529,7 +529,7 @@ async function _doCreateTopic(api: ZaloAPI, accountId: string, accountName: stri
   // Auto-sync group history khi tạo topic mới (nếu được bật)
   if (type === 1 /* Group */ && config.zalo.historyAutoSync) {
     // Chạy trong background, không block tin nhắn đang đến
-    void syncGroupHistory(api, zaloId, topicId).catch(err =>
+    void syncGroupHistory(api, zaloId, topicId, accountId).catch(err =>
       console.warn(`[Zalo→TG] Auto history sync failed for group=${zaloId}:`, err),
     );
   }
@@ -637,10 +637,10 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         // TG→Zalo media is first stored with placeholder quote data; when echo
         // arrives we replace it with real msgType/content so future replies in
         // Telegram produce native quote previews in Zalo.
-        const _tgId = msgStore.getTgMsgId(msg.data.msgId)
-          ?? (msg.data.realMsgId ? msgStore.getTgMsgId(msg.data.realMsgId) : undefined)
+        const _tgId = msgStore.getTgMsgId(accountId, msg.data.msgId)
+          ?? (msg.data.realMsgId ? msgStore.getTgMsgId(accountId, msg.data.realMsgId) : undefined)
           ?? ((msg.data.cliMsgId && msg.data.cliMsgId !== '0')
-            ? msgStore.getTgMsgId(msg.data.cliMsgId)
+            ? msgStore.getTgMsgId(accountId, msg.data.cliMsgId)
             : undefined);
 
         if (_tgId !== undefined) {
@@ -658,8 +658,8 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
 
         // If this msgId is already tracked in sentMsgStore OR we're in the
         // middle of sending to this Zalo thread → it's an echo, skip.
-        const isEcho = sentMsgStore.getByZaloMsgId(msg.data.msgId) !== undefined
-          || sentMsgStore.isSendingTo(msg.threadId);
+        const isEcho = sentMsgStore.getByZaloMsgId(accountId, msg.data.msgId) !== undefined
+          || sentMsgStore.isSendingTo(accountId, msg.threadId);
         if (isEcho) {
           console.log(`[Zalo→TG] Skip echo self message (${msg.data.msgId})`);
           return;
@@ -673,13 +673,13 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
       // (handles concurrent re-emits that arrive before any is saved to msgStore).
       const _primaryMsgId = msg.data.msgId;
       if (_primaryMsgId) {
-        if (msgStore.getTgMsgId(_primaryMsgId) !== undefined || msgStore.isInFlight(_primaryMsgId)) {
+        if (msgStore.getTgMsgId(accountId, _primaryMsgId) !== undefined || msgStore.isInFlight(accountId, _primaryMsgId)) {
           console.log(`[Zalo→TG] Skip duplicate/reaction re-emit msgId=${_primaryMsgId}`);
           return;
         }
-        msgStore.markInFlight(_primaryMsgId);
+        msgStore.markInFlight(accountId, _primaryMsgId);
         // Auto-remove from in-flight after 10 s (msgStore.save will be the permanent record)
-        setTimeout(() => msgStore.unmarkInFlight(_primaryMsgId), 10_000);
+        setTimeout(() => msgStore.unmarkInFlight(accountId, _primaryMsgId), 10_000);
       }
 
       const zaloId = msg.threadId;
@@ -771,7 +771,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
           // Primary: messages received from Zalo and forwarded to TG.
           // IMPORTANT: Zalo globalMsgId is NOT unique across groups — validate the found
           // mapping belongs to the same thread to avoid quoting a message from a different group.
-          const _candidateTg = msgStore.getTgMsgId(globalId);
+          const _candidateTg = msgStore.getTgMsgId(accountId, globalId);
           if (_candidateTg !== undefined) {
             const _quoteData = msgStore.getQuote(_candidateTg);
             if (!_quoteData || _quoteData.zaloId === zaloId) {
@@ -782,7 +782,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
             }
           }
           // Fallback: messages we sent from TG to Zalo (reverse lookup), also validate thread
-          const _sentTg = sentMsgStore.getByZaloMsgId(globalId);
+          const _sentTg = sentMsgStore.getByZaloMsgId(accountId, globalId);
           if (_sentTg !== undefined) {
             const _sentInfo = sentMsgStore.get(_sentTg);
             if (!_sentInfo || _sentInfo.zaloId === zaloId) {
@@ -829,7 +829,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         threadType: type,
       };
       const saveTgMapping = (sent: { message_id: number }) => {
-        msgStore.save(sent.message_id, zaloMsgIds, zaloQuoteData);
+        msgStore.save(accountId, sent.message_id, zaloMsgIds, zaloQuoteData);
       };
 
       // ── 1. Plain text / rich text ─────────────────────────────────────────
@@ -951,7 +951,7 @@ ${escapeHtml(photoCaption)}`
                 );
                 // Use buf.zaloQuote which already has the correct cliMsgId and
                 // parsed media content object (not raw JSON string).
-                msgStore.save(sent.message_id, buf.zaloMsgIds, buf.zaloQuote!);
+                msgStore.save(accountId, sent.message_id, buf.zaloMsgIds, buf.zaloQuote!);
               } finally { await cleanTemp(localPath); }
             } else {
               // Multi-photo album — download all concurrently and send as media group
@@ -987,7 +987,7 @@ ${escapeHtml(photoCaption)}`
                   // Save mapping for every photo so replying to ANY album photo
                   // produces a valid Zalo quote
                   for (const sentMsg of sentMsgs) {
-                    msgStore.save(sentMsg.message_id, buf.zaloMsgIds, buf.zaloQuote!);
+                    msgStore.save(accountId, sentMsg.message_id, buf.zaloMsgIds, buf.zaloQuote!);
                   }
                 }
               } finally {
@@ -1548,9 +1548,9 @@ ${escapeHtml(photoCaption)}`
 
           // Lookup lần lượt: msgStore (Zalo→TG messages) rồi sentMsgStore (TG→Zalo messages)
           const tgMsgId =
-            (globalId ? (msgStore.getTgMsgId(globalId) ?? sentMsgStore.getByZaloMsgId(globalId)) : undefined) ??
-            (clientId ? (msgStore.getTgMsgId(clientId) ?? sentMsgStore.getByZaloMsgId(clientId)) : undefined) ??
-            (destId ? (msgStore.getTgMsgId(destId) ?? sentMsgStore.getByZaloMsgId(destId)) : undefined);
+            (globalId ? (msgStore.getTgMsgId(accountId, globalId) ?? sentMsgStore.getByZaloMsgId(accountId, globalId)) : undefined) ??
+            (clientId ? (msgStore.getTgMsgId(accountId, clientId) ?? sentMsgStore.getByZaloMsgId(accountId, clientId)) : undefined) ??
+            (destId ? (msgStore.getTgMsgId(accountId, destId) ?? sentMsgStore.getByZaloMsgId(accountId, destId)) : undefined);
 
           if (tgMsgId === undefined) {
             // Tin nhắn bị xoá chưa từng được bridge (gửi trước khi bridge start,
@@ -1647,7 +1647,7 @@ ${escapeHtml(photoCaption)}`
         return;
       }
 
-      const tgMsgId = msgStore.getTgMsgId(zaloMsgId);
+      const tgMsgId = msgStore.getTgMsgId(accountId, zaloMsgId);
       if (tgMsgId === undefined) {
         console.log(`[ZaloHandler] Undo: no TG mapping for zaloMsgId=${zaloMsgId}`);
         return;
@@ -1756,7 +1756,7 @@ ${escapeHtml(photoCaption)}`
 
       let tgMsgId: number | undefined;
       for (const msgId of targetMsgIds) {
-        tgMsgId = msgStore.getTgMsgId(msgId) ?? sentMsgStore.getByZaloMsgId(msgId);
+        tgMsgId = msgStore.getTgMsgId(accountId, msgId) ?? sentMsgStore.getByZaloMsgId(accountId, msgId);
         if (tgMsgId !== undefined) break;
       }
       if (tgMsgId === undefined) {

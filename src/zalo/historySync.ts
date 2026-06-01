@@ -108,6 +108,7 @@ async function sendHistoryMsg(
   msg: HistoryMsg,
   topicId: number,
   groupId: string,
+  accountId?: string,
 ): Promise<void> {
   const msgType = msg.data.msgType ?? ZALO_MSG_TYPES.TEXT;
   const { text, media } = parseContent(msg.data.content);
@@ -149,7 +150,7 @@ async function sendHistoryMsg(
   };
 
   const saveTgMapping = (sent: { message_id: number }) => {
-    msgStore.save(sent.message_id, zaloMsgIds, zaloQuoteData);
+    msgStore.save(accountId || 'default', sent.message_id, zaloMsgIds, zaloQuoteData);
   };
 
   // Caption: hiển thị người gửi + thời gian
@@ -359,6 +360,7 @@ export async function syncGroupHistory(
   api: ZaloAPI,
   groupId: string,
   topicId: number,
+  accountId?: string,
   opts?: SyncGroupHistoryOptions,
 ): Promise<number> {
   const count   = opts?.count   ?? config.zalo.historySyncCount;
@@ -395,7 +397,8 @@ export async function syncGroupHistory(
     const ids = [m.data?.msgId, m.data?.realMsgId, m.data?.cliMsgId].filter(Boolean) as string[];
     if (ids.length === 0) return false;
     // Nếu có bất kỳ ID nào đã lưu hoặc đang xử lý, bỏ qua tin này
-    return !ids.some(id => msgStore.getTgMsgId(id) !== undefined || msgStore.isInFlight(id));
+    const accId = accountId || 'default';
+    return !ids.some(id => msgStore.getTgMsgId(accId, id) !== undefined || msgStore.isInFlight(accId, id));
   });
 
   if (toSync.length === 0) {
@@ -406,7 +409,8 @@ export async function syncGroupHistory(
   // Đánh dấu các tin sẽ sync là in-flight để tránh race condition (khi handler.ts nhận message đồng thời)
   for (const m of toSync) {
     const ids = [m.data?.msgId, m.data?.realMsgId, m.data?.cliMsgId].filter(Boolean) as string[];
-    for (const id of ids) msgStore.markInFlight(id);
+    const accId = accountId || 'default';
+    for (const id of ids) msgStore.markInFlight(accId, id);
   }
 
   // Gửi header phân cách vào Telegram
@@ -426,13 +430,14 @@ export async function syncGroupHistory(
     const msg = toSync[i]!;
     if (i > 0) await delay(delayMs);
     try {
-      await sendHistoryMsg(api, msg, topicId, groupId);
+      await sendHistoryMsg(api, msg, topicId, groupId, accountId);
       forwarded++;
     } catch (err) {
       console.warn(`[HistorySync] Failed to forward msgId=${msg.data?.msgId}:`, err);
     } finally {
       const ids = [msg.data?.msgId, msg.data?.realMsgId, msg.data?.cliMsgId].filter(Boolean) as string[];
-      for (const id of ids) msgStore.unmarkInFlight(id);
+      const accId = accountId || 'default';
+      for (const id of ids) msgStore.unmarkInFlight(accId, id);
     }
   }
 

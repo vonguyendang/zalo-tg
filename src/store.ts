@@ -320,32 +320,34 @@ function _evictOne(): void {
 
 export const msgStore = {
   /** Check if a Zalo message is currently being forwarded (in-flight). */
-  isInFlight(zaloMsgId: string): boolean {
-    return zaloMsgId ? _inFlightMsgIds.has(zaloMsgId) : false;
+  isInFlight(accountId: string, zaloMsgId: string): boolean {
+    return zaloMsgId ? _inFlightMsgIds.has(`${accountId}_${zaloMsgId}`) : false;
   },
 
   /** Mark a Zalo message as currently being forwarded to prevent duplicates. */
-  markInFlight(zaloMsgId: string): void {
-    if (zaloMsgId && zaloMsgId !== '0') _inFlightMsgIds.add(zaloMsgId);
+  markInFlight(accountId: string, zaloMsgId: string): void {
+    if (zaloMsgId && zaloMsgId !== '0') _inFlightMsgIds.add(`${accountId}_${zaloMsgId}`);
   },
 
   /** Unmark an in-flight Zalo message (e.g. if sending failed). */
-  unmarkInFlight(zaloMsgId: string): void {
-    if (zaloMsgId) _inFlightMsgIds.delete(zaloMsgId);
+  unmarkInFlight(accountId: string, zaloMsgId: string): void {
+    if (zaloMsgId) _inFlightMsgIds.delete(`${accountId}_${zaloMsgId}`);
   },
 
   /**
    * Save a bidirectional mapping after a Zalo message is forwarded to Telegram.
+   * @param accountId    The Zalo account ID this message belongs to.
    * @param tgMsgId      The Telegram message_id of the forwarded message.
    * @param zaloMsgIds   One or more Zalo IDs (msgId, realMsgId) that refer to the same message.
    * @param quote        Data needed to quote this message in future sends.
    */
-  save(tgMsgId: number, zaloMsgIds: string[], quote: ZaloQuoteData): void {
+  save(accountId: string, tgMsgId: number, zaloMsgIds: string[], quote: ZaloQuoteData): void {
     // Drop sentinel "0" and empty IDs — they are realMsgId=0 placeholders,
     // nobody ever queries getTgMsgId("0") so storing them is pure waste.
     const validIds = zaloMsgIds.filter(id => id && id !== '0');
     while (_msgKeyOrder.length + validIds.length > MSG_CACHE_MAX) _evictOne();
-    for (const id of validIds) {
+    for (const rawId of validIds) {
+      const id = `${accountId}_${rawId}`;
       if (!_zaloToTg.has(id)) {
         _tgRefCount.set(tgMsgId, (_tgRefCount.get(tgMsgId) ?? 0) + 1);
         _msgKeyOrder.push(id);
@@ -357,8 +359,8 @@ export const msgStore = {
   },
 
   /** Get the Telegram message_id for a given Zalo message ID. */
-  getTgMsgId(zaloMsgId: string): number | undefined {
-    return _zaloToTg.get(zaloMsgId);
+  getTgMsgId(accountId: string, zaloMsgId: string): number | undefined {
+    return _zaloToTg.get(`${accountId}_${zaloMsgId}`) ?? _zaloToTg.get(zaloMsgId); // Fallback for old cache
   },
 
   /** Get the Zalo quote data for a given Telegram message_id (for TG→Zalo replies). */
@@ -744,15 +746,17 @@ export const sentMsgStore = {
         const oldInfo = _sentMap.get(oldest);
         _sentMap.delete(oldest);
         if (oldInfo) {
+          const accId = oldInfo.accountId || 'default';
           for (const mid of oldInfo.msgIds) {
-            _sentByZaloId.delete(String(mid));
+            _sentByZaloId.delete(`${accId}_${mid}`);
           }
         }
       }
     }
     _sentMap.set(tgMsgId, info);
+    const accId = info.accountId || 'default';
     for (const mid of info.msgIds) {
-      _sentByZaloId.set(String(mid), tgMsgId);
+      _sentByZaloId.set(`${accId}_${mid}`, tgMsgId);
     }
   },
 
@@ -765,8 +769,8 @@ export const sentMsgStore = {
    * return the original TG message_id. Used so Zalo replies to our
    * sent messages chain correctly on the TG side.
    */
-  getByZaloMsgId(zaloMsgId: string): number | undefined {
-    return _sentByZaloId.get(zaloMsgId);
+  getByZaloMsgId(accountId: string, zaloMsgId: string): number | undefined {
+    return _sentByZaloId.get(`${accountId}_${zaloMsgId}`) ?? _sentByZaloId.get(zaloMsgId); // Fallback for old cache
   },
 
   /**
@@ -774,13 +778,13 @@ export const sentMsgStore = {
    * Call BEFORE api.sendMessage() to avoid race condition where Zalo echoes
    * back the message before the HTTP response (and sentMsgStore.save) arrives.
    */
-  markSending(zaloId: string): void {
-    _pendingSendConvos.set(zaloId, Date.now());
+  markSending(accountId: string, zaloId: string): void {
+    _pendingSendConvos.set(`${accountId}_${zaloId}`, Date.now());
   },
 
   /** Call AFTER sentMsgStore.save() or on send error. */
-  unmarkSending(zaloId: string): void {
-    _pendingSendConvos.delete(zaloId);
+  unmarkSending(accountId: string, zaloId: string): void {
+    _pendingSendConvos.delete(`${accountId}_${zaloId}`);
   },
 
   /**
@@ -791,8 +795,8 @@ export const sentMsgStore = {
    * on this window. Reduced from 15s to 5s to minimise false suppression
    * of genuine messages arriving from other devices.
    */
-  isSendingTo(zaloId: string): boolean {
-    const ts = _pendingSendConvos.get(zaloId);
+  isSendingTo(accountId: string, zaloId: string): boolean {
+    const ts = _pendingSendConvos.get(`${accountId}_${zaloId}`);
     return ts !== undefined && Date.now() - ts < 5_000;
   },
 

@@ -562,7 +562,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       const { syncGroupHistory } = await import('../zalo/historySync.js');
       const api = resolveApiForTopic(topicId);
       if (!api) throw new Error('API not found');
-      const forwarded = await syncGroupHistory(api, entry.zaloId, topicId, { count, delayMs });
+      const forwarded = await syncGroupHistory(api, entry.zaloId, topicId, entry.accountId, { count, delayMs });
       await ctx.telegram.sendMessage(
         config.telegram.groupId,
         `✅ Đã đồng bộ <b>${forwarded}</b> tin nhắn lịch sử.`,
@@ -2517,7 +2517,8 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
             ]
           : _rawTextMentions;
 
-        sentMsgStore.markSending(zaloId);
+        const accountId = entry.accountId || 'default';
+        sentMsgStore.markSending(accountId, zaloId);
         try {
           const chunks = splitLongText(finalText);
           let firstResult: Awaited<ReturnType<typeof api.sendMessage>> | undefined;
@@ -2545,10 +2546,10 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
           }
           const zaloMsgId = firstResult?.message?.msgId;
           if (zaloMsgId !== undefined) {
-            sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
+            sentMsgStore.save(msg.message_id, { accountId, msgIds: [zaloMsgId], zaloId, threadType });
             const ownUid = String(api.getOwnId?.() ?? '');
             console.log(`[TG→Zalo] msgStore.save for tgMsgId=${msg.message_id} msgId=${zaloMsgId} ownUid=${ownUid}`);
-            msgStore.save(msg.message_id, [String(zaloMsgId)], {
+            msgStore.save(accountId, msg.message_id, [String(zaloMsgId)], {
               msgId: String(zaloMsgId),
               cliMsgId: '',
               uidFrom: ownUid,
@@ -2563,7 +2564,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
         } catch (err) {
           await notifyError('sendMessage', err);
         } finally {
-          sentMsgStore.unmarkSending(zaloId);
+          sentMsgStore.unmarkSending(accountId, zaloId);
         }
         return;
       }
@@ -2627,7 +2628,8 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
           }
         }
         const localPath = await downloadToTemp(fileLink.toString(), filename);
-        sentMsgStore.markSending(zaloId);
+        const accountId = entry.accountId || 'default';
+        sentMsgStore.markSending(accountId, zaloId);
         try {
           console.log(`[TG→Zalo] Sending ${filename} → zaloId=${zaloId} type=${threadType}`);
 
@@ -2677,9 +2679,9 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
 
           const zaloMsgId = sendResult?.message?.msgId ?? sendResult?.attachment?.[0]?.msgId;
           if (zaloMsgId !== undefined) {
-sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
+          sentMsgStore.save(msg.message_id, { accountId, msgIds: [zaloMsgId], zaloId, threadType });
           const ownUid = String(api.getOwnId?.() ?? '');
-          msgStore.save(msg.message_id, [String(zaloMsgId)], {
+          msgStore.save(accountId, msg.message_id, [String(zaloMsgId)], {
             msgId: String(zaloMsgId),
             cliMsgId: '',
             uidFrom: ownUid,
@@ -2695,7 +2697,7 @@ sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
         } catch (err) {
           await notifyError(`sendAttachment(${filename})`, err);
         } finally {
-          sentMsgStore.unmarkSending(zaloId);
+          sentMsgStore.unmarkSending(accountId, zaloId);
           await cleanTemp(localPath);
         }
       };
@@ -2750,7 +2752,8 @@ sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
             if (item.tgMsgId !== undefined) downloadedTgIds.push(item.tgMsgId);
           }
           if (localPaths.length === 0) return;
-          sentMsgStore.markSending(meta.zaloId);
+          const accountId = entry.accountId || 'default';
+          sentMsgStore.markSending(accountId, meta.zaloId);
           try {
             const sendResult = await api.sendMessage(
               {
@@ -2775,8 +2778,8 @@ sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
               for (let i = 0; i < downloadedTgIds.length; i++) {
                 const tgId = downloadedTgIds[i];
                 const msgIdForItem = zaloMsgIds[Math.min(attStartIdx + i, zaloMsgIds.length - 1)] ?? zaloMsgIds[0] ?? '';
-                sentMsgStore.save(tgId, { msgIds: zaloMsgIds, zaloId: meta.zaloId, threadType: meta.threadType });
-                msgStore.save(tgId, [String(msgIdForItem)], {
+                sentMsgStore.save(tgId, { accountId, msgIds: zaloMsgIds, zaloId: meta.zaloId, threadType: meta.threadType });
+                msgStore.save(accountId, tgId, [String(msgIdForItem)], {
                   msgId: String(msgIdForItem),
                   cliMsgId: '',
                   uidFrom: ownUid,
@@ -2791,7 +2794,7 @@ sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
               console.log(`[TG→Zalo] Media group sent: ${localPaths.length} files, msgIds=[${zaloMsgIds}]`);
             }
           } finally {
-            sentMsgStore.unmarkSending(meta.zaloId);
+            sentMsgStore.unmarkSending(accountId, meta.zaloId);
           }
         } catch (err) {
           console.error('[TG→Zalo] Media group send failed:', err);
@@ -2896,7 +2899,8 @@ sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
             } catch { /* keep fallback thumbUrl */ }
           }
 
-          sentMsgStore.markSending(zaloId);
+          const accountId = entry.accountId || 'default';
+          sentMsgStore.markSending(accountId, zaloId);
           try {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const result = await (api.sendVideo as (...a: any[]) => Promise<{ msgId?: number }>)(
@@ -2912,9 +2916,9 @@ sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
               threadType,
             );
             if (result?.msgId !== undefined) {
-              sentMsgStore.save(msg.message_id, { msgIds: [result.msgId], zaloId, threadType });
+              sentMsgStore.save(msg.message_id, { accountId, msgIds: [result.msgId], zaloId, threadType });
               const ownUid = String(api.getOwnId?.() ?? '');
-              msgStore.save(msg.message_id, [String(result.msgId)], {
+              msgStore.save(accountId, msg.message_id, [String(result.msgId)], {
                 msgId: String(result.msgId),
                 cliMsgId: '',
                 uidFrom: ownUid,
@@ -2927,7 +2931,7 @@ sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
               });
             }
           } finally {
-            sentMsgStore.unmarkSending(zaloId);
+            sentMsgStore.unmarkSending(accountId, zaloId);
           }
         } catch (err) {
           console.error('[TG→Zalo] sendVideo failed, fallback to attachment:', err);
@@ -2973,9 +2977,10 @@ sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
           ) as Record<string, unknown>;
           const voiceMsgId = voiceResult?.msgId ?? (voiceResult?.message as Record<string, unknown> | undefined)?.msgId;
           if (voiceMsgId != null && !Number.isNaN(Number(voiceMsgId))) {
-            sentMsgStore.save(msg.message_id, { msgIds: [Number(voiceMsgId)], zaloId, threadType });
+            const accountId = entry.accountId || 'default';
+            sentMsgStore.save(msg.message_id, { accountId, msgIds: [Number(voiceMsgId)], zaloId, threadType });
             const ownUid = String(api.getOwnId?.() ?? '');
-            msgStore.save(msg.message_id, [String(voiceMsgId)], {
+            msgStore.save(accountId, msg.message_id, [String(voiceMsgId)], {
               msgId: String(voiceMsgId),
               cliMsgId: '',
               uidFrom: ownUid,
@@ -3008,16 +3013,17 @@ sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
             const fileLink = await ctx.telegram.getFileLink(sticker.file_id);
             webmPath = await downloadToTemp(fileLink.toString(), `sticker_${Date.now()}.webm`);
             gifPath  = await convertWebmToGif(webmPath);
-            sentMsgStore.markSending(zaloId);
+            const accountId = entry.accountId || 'default';
+            sentMsgStore.markSending(accountId, zaloId);
             try {
               const sendResult = await api.sendMessage(
                 { msg: '', attachments: [gifPath] }, zaloId, threadType,
               ) as { message?: { msgId?: number } | null; attachment?: Array<{ msgId?: number }> };
               const zaloMsgId = sendResult?.message?.msgId ?? sendResult?.attachment?.[0]?.msgId;
               if (zaloMsgId !== undefined) {
-                sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
+                sentMsgStore.save(msg.message_id, { accountId, msgIds: [zaloMsgId], zaloId, threadType });
                 const ownUid = String(api.getOwnId?.() ?? '');
-                msgStore.save(msg.message_id, [String(zaloMsgId)], {
+                msgStore.save(accountId, msg.message_id, [String(zaloMsgId)], {
                   msgId: String(zaloMsgId),
                   cliMsgId: '',
                   uidFrom: ownUid,
@@ -3030,7 +3036,7 @@ sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
                 });
               }
             } finally {
-              sentMsgStore.unmarkSending(zaloId);
+              sentMsgStore.unmarkSending(accountId, zaloId);
             }
           } catch (err) {
             console.error('[TG→Zalo] sticker webm→gif failed, falling back to thumbnail:', err);
@@ -3148,14 +3154,15 @@ sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
         const locationLabel = venue?.title
           ? `📍 ${venue.title}${venue.address ? ` — ${venue.address}` : ''}\n${mapsUrl}`
           : `📍 ${mapsUrl}`;
-        sentMsgStore.markSending(zaloId);
+        const accountId = entry.accountId || 'default';
+        sentMsgStore.markSending(accountId, zaloId);
         try {
           const result = await api.sendMessage({ msg: locationLabel }, zaloId, threadType) as { message?: { msgId?: number } };
           const zaloMsgId = result?.message?.msgId;
           if (zaloMsgId !== undefined) {
-            sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
+            sentMsgStore.save(msg.message_id, { accountId, msgIds: [zaloMsgId], zaloId, threadType });
             const ownUid = String(api.getOwnId?.() ?? '');
-            msgStore.save(msg.message_id, [String(zaloMsgId)], {
+            msgStore.save(accountId, msg.message_id, [String(zaloMsgId)], {
               msgId: String(zaloMsgId),
               cliMsgId: '',
               uidFrom: ownUid,
@@ -3171,7 +3178,7 @@ sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
         } catch (err) {
           console.error('[TG→Zalo] Location send error:', err);
         } finally {
-          sentMsgStore.unmarkSending(zaloId);
+          sentMsgStore.unmarkSending(accountId, zaloId);
         }
         return;
       }
@@ -3186,14 +3193,15 @@ sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
           // TG user_id is not Zalo UID, skip sendCard attempt
         }
         if (!cardSent) {
-          sentMsgStore.markSending(zaloId);
+          const accountId = entry.accountId || 'default';
+          sentMsgStore.markSending(accountId, zaloId);
           try {
             const result = await api.sendMessage({ msg: `👤 ${fullName} — ${contact.phone_number}` }, zaloId, threadType) as { message?: { msgId?: number } };
             const zaloMsgId = result?.message?.msgId;
             if (zaloMsgId !== undefined) {
-              sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
+              sentMsgStore.save(msg.message_id, { accountId, msgIds: [zaloMsgId], zaloId, threadType });
               const ownUid = String(api.getOwnId?.() ?? '');
-              msgStore.save(msg.message_id, [String(zaloMsgId)], {
+              msgStore.save(accountId, msg.message_id, [String(zaloMsgId)], {
                 msgId: String(zaloMsgId),
                 cliMsgId: '',
                 uidFrom: ownUid,
@@ -3208,7 +3216,7 @@ sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
           } catch (err) {
             await notifyError('sendContact', err);
           } finally {
-            sentMsgStore.unmarkSending(zaloId);
+            sentMsgStore.unmarkSending(accountId, zaloId);
           }
         }
         return;
