@@ -52,13 +52,13 @@ let _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ── Boot Zalo (also used when /login swaps in a fresh API) ───────────────────
 
-async function pruneLeftGroupTopics(api: Awaited<ReturnType<typeof getZaloApi>>): Promise<void> {
+async function pruneLeftGroupTopics(api: Awaited<ReturnType<typeof getZaloApi>>, accountId: string): Promise<void> {
   try {
     const groups = await api.getAllGroups() as { gridVerMap?: Record<string, string> } | undefined;
     const activeGroupIds = new Set(Object.keys(groups?.gridVerMap ?? {}));
     const removed: string[] = [];
     for (const entry of store.all()) {
-      if (entry.type === 1 && !activeGroupIds.has(entry.zaloId)) {
+      if (entry.type === 1 && entry.accountId === accountId && !activeGroupIds.has(entry.zaloId)) {
         store.remove(entry.topicId);
         removed.push(`${entry.name} (${entry.zaloId})`);
       }
@@ -78,7 +78,7 @@ async function startZalo(
   accountName: string,
   isReconnect = false,
 ): Promise<void> {
-  if (!isReconnect) void pruneLeftGroupTopics(api);
+  if (!isReconnect) void pruneLeftGroupTopics(api, accountId);
   await setupZaloHandler(api, accountId, accountName);
 
   if (isReconnect) {
