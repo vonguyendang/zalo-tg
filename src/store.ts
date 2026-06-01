@@ -93,9 +93,12 @@ export const store = {
   migrateDefaultAccount(realAccountId: string): void {
     let changed = false;
     for (const [topicId, entry] of Object.entries(_data.topics)) {
-      if (entry.accountId === 'default') {
-        const oldKey = `default:${entry.type}:${entry.zaloId}`;
-        if (_data.zaloIndex[oldKey] === entry.topicId) delete _data.zaloIndex[oldKey];
+      if (!entry.accountId || entry.accountId === 'default') {
+        const oldKey1 = `default:${entry.type}:${entry.zaloId}`;
+        const oldKey2 = `${entry.zaloId}`; // Legacy before multi-zalo
+        if (_data.zaloIndex[oldKey1] === entry.topicId) delete _data.zaloIndex[oldKey1];
+        if (_data.zaloIndex[oldKey2] === entry.topicId) delete _data.zaloIndex[oldKey2];
+        
         entry.accountId = realAccountId;
         _data.zaloIndex[zaloKey(realAccountId, entry.zaloId, entry.type)] = entry.topicId;
         changed = true;

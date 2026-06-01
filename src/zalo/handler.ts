@@ -1597,8 +1597,7 @@ ${escapeHtml(photoCaption)}`
       // If the TG topic was deleted, clear the stale mapping so the next message
       // from this conversation will trigger topic recreation automatically.
       if (isTopicDeletedError(err)) {
-    // @ts-ignore
-        const staleTopicId = store.getTopicByZalo(msg.threadId, msg.type as 0 | 1);
+        const staleTopicId = store.getTopicByZalo(accountId, msg.threadId, msg.type as 0 | 1);
         if (staleTopicId !== undefined) {
           console.warn(`[Zalo→TG] Topic ${staleTopicId} was deleted — removing stale mapping for ${msg.threadId}`);
           store.remove(staleTopicId);
@@ -1656,8 +1655,7 @@ ${escapeHtml(photoCaption)}`
       // Find which topic this message belongs to
       const zaloId = undo?.threadId ?? data?.idTo;
       const type = (undo?.isGroup ? 1 : 0) as 0 | 1;
-    // @ts-ignore
-      const topicId = store.getTopicByZalo(String(zaloId), type);
+      const topicId = store.getTopicByZalo(accountId, String(zaloId), type);
       if (topicId === undefined) return;
 
       // Reply to the original forwarded TG message to notify it was recalled on Zalo
@@ -1861,8 +1859,7 @@ ${escapeHtml(photoCaption)}`
           return;
         }
 
-    // @ts-ignore
-        const topicId = store.getTopicByZalo(groupId, 1 /* Group */);
+        const topicId = store.getTopicByZalo(accountId, groupId, 1 /* Group */);
         if (topicId === undefined) return;
 
         const totalPending: number = data?.totalPending ?? uids.length;
@@ -1973,8 +1970,7 @@ ${escapeHtml(photoCaption)}`
       const NOTIFY_TYPES = new Set(['join', 'leave', 'remove_member', 'block_member']);
       if (!type || !NOTIFY_TYPES.has(type)) return;
 
-    // @ts-ignore
-      const topicId = store.getTopicByZalo(groupId, 1 /* Group */);
+      const topicId = store.getTopicByZalo(accountId, groupId, 1 /* Group */);
       if (topicId === undefined) return;
 
       const members: Array<{ dName?: string }> = data?.updateMembers ?? [];
