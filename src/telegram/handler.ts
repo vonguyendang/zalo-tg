@@ -269,7 +269,7 @@ let appLoginInProgress = false;
 async function handleLoginCommand(
   chatId: number,
   threadId: number | undefined,
-  onNewApi: (api: ZaloAPI) => void,
+  onNewApi: (api: ZaloAPI, accountId: string, accountName: string) => void,
 ): Promise<void> {
   if (qrLoginInProgress) {
     await tgBot.telegram.sendMessage(
@@ -320,7 +320,7 @@ async function handleLoginCommand(
       },
     });
 
-    onNewApi(newApi);
+    onNewApi(newApi.api, newApi.uid, 'Zalo');
   } catch (err) {
     await tgBot.telegram.sendMessage(
       chatId,
@@ -356,10 +356,10 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       return;
     }
     const threadId = isFromGroup ? ctx.message.message_thread_id : undefined;
-    await handleLoginCommand(ctx.chat.id, threadId, (newApi) => {
-      currentApi = newApi;
+    await handleLoginCommand(ctx.chat.id, threadId, (api, accountId, accountName) => {
+      currentApi = api;
     // @ts-ignore
-      void onZaloLogin(newApi).catch((e: unknown) => console.error('[/login] onZaloLogin error:', e));
+      void onLoginCb(api, accountId, accountName).catch((e: unknown) => console.error('[/login] onZaloLogin error:', e));
     });
   });
 
@@ -369,10 +369,10 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
     const isFromGroup = ctx.chat.id === config.telegram.groupId;
     if (!isPrivate && !isFromGroup) return;
     const threadId = isFromGroup ? ctx.message.message_thread_id : undefined;
-    await handleLoginCommand(ctx.chat.id, threadId, (newApi) => {
-      currentApi = newApi;
+    await handleLoginCommand(ctx.chat.id, threadId, (api, accountId, accountName) => {
+      currentApi = api;
     // @ts-ignore
-      void onZaloLogin(newApi).catch((e: unknown) => console.error('[/loginweb] onZaloLogin error:', e));
+      void onLoginCb(api, accountId, accountName).catch((e: unknown) => console.error('[/loginweb] onZaloLogin error:', e));
     });
   });
 
@@ -423,9 +423,9 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       });
 
       invalidateAppSession();
-      currentApi = newApi;
+      currentApi = newApi.api;
     // @ts-ignore
-      void onZaloLogin(newApi).catch((e: unknown) => console.error('[/loginapp] onZaloLogin error:', e));
+      void onLoginCb(newApi.api, newApi.uid, 'Zalo').catch((e: unknown) => console.error('[/loginapp] onZaloLogin error:', e));
     } catch (err) {
       await tgBot.telegram.sendMessage(
         chatId,

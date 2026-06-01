@@ -132,8 +132,9 @@ async function startZalo(
         if (_reconnectInProgress) return;
         _reconnectInProgress = true;
         try {
-          clearCredentials(accountId); // clear memory only
-          const newApi = getZaloApi(accountId);
+          // Instead of clearCredentials which deletes the file, just remove from Map
+          const { initZaloApi } = await import('./zalo/client.js');
+          const newApi = await initZaloApi(accountId);
           if (newApi) {
             await startZalo(newApi, accountId, accountName, true);
             tgBot.telegram.sendMessage(config.telegram.groupId, `✅ Zalo (${accountName}) đã kết nối lại.`).catch(() => undefined);

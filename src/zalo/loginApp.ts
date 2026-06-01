@@ -343,5 +343,5 @@ export async function triggerAppLogin(hooks: AppLoginHooks = {}): Promise<{api: 
   const api = await zalo.login(credentials as Parameters<typeof zalo.login>[0]) as ZaloAPI;
   console.log('[AppLogin] zca-js login successful ✓');
   await hooks.onSuccess?.().catch(console.error);
-  return api;
+  return {api, uid};
 }
