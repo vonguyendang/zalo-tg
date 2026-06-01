@@ -538,7 +538,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       return;
     }
 
-    if (!currentApi) {
+    if (getAllZaloApis().size === 0) {
       await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Zalo chưa kết nối.', replyOpts);
       return;
     }
@@ -729,10 +729,11 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       if (groupData) {
         console.log(`[API][APP] getGroupInfo group=${entry.zaloId} source=callgroup`);
       }
-      if (!groupData && currentApi) {
+      const api = resolveApiForTopic(entry.topicId);
+      if (!groupData && api) {
         try {
           console.log(`[API][WEB] getGroupInfo group=${entry.zaloId} source=callgroup fallback=app_empty`);
-          const info = await currentApi.getGroupInfo(entry.zaloId) as {
+          const info = await api.getGroupInfo(entry.zaloId) as {
             gridInfoMap?: Record<string, { memVerList?: string[] }>;
           };
           groupData = info?.gridInfoMap?.[entry.zaloId] ?? null;
@@ -857,8 +858,8 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Topic này không phải nhóm Zalo.', replyOpts);
       return;
     }
-
-    if (!currentApi) {
+    const api = resolveApiForTopic(entry.topicId);
+    if (!api) {
       await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Zalo chưa kết nối', replyOpts);
       return;
     }
@@ -873,7 +874,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       }
       if (!groupData) {
         console.log(`[API][WEB] getGroupInfo group=${groupId} source=group_info fallback=app_empty`);
-        const info = await currentApi.getGroupInfo(groupId) as {
+        const info = await api.getGroupInfo(groupId) as {
           gridInfoMap?: Record<string, {
             name?: string;
             avt?: string;
@@ -1022,7 +1023,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       try {
         let recalled = 0;
         for (const mid of sent.msgIds) {
-          await currentApi.undo({ msgId: mid, cliMsgId: 0 }, sent.zaloId, zaloThreadType);
+          await api.undo({ msgId: mid, cliMsgId: 0 }, sent.zaloId, zaloThreadType);
           markRecalled(String(mid));
           recalled++;
         }
@@ -1044,7 +1045,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
     const { ThreadType } = await import('zca-js');
     const zaloThreadType = quote.threadType === 1 ? ThreadType.Group : ThreadType.User;
     try {
-      await currentApi.undo(
+      await api.undo(
         { msgId: Number(quote.msgId), cliMsgId: quote.cliMsgId ? Number(quote.cliMsgId) : 0 },
         quote.zaloId,
         zaloThreadType,
@@ -1075,16 +1076,19 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       return;
     }
 
-    if (!currentApi) { await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Zalo chưa kết nối', replyOpts); return; }
+    if (getAllZaloApis().size === 0) { await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Zalo chưa kết nối', replyOpts); return; }
 
     const phoneQuery = normalizePhoneSearchQuery(query);
     if (phoneQuery) {
       try {
-        const user = await currentApi.findUser(phoneQuery) as {
-          uid?: string;
-          display_name?: string;
-          zalo_name?: string;
-        } | undefined;
+        let user: { uid?: string; display_name?: string; zalo_name?: string } | undefined;
+        let foundAccountId = '';
+        for (const [accId, a] of getAllZaloApis().entries()) {
+          try {
+            user = await a.findUser(phoneQuery) as any;
+            if (user?.uid) { foundAccountId = accId; break; }
+          } catch { /* ignore */ }
+        }
 
         if (!user?.uid) {
           await ctx.telegram.sendMessage(
@@ -1596,7 +1600,8 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       return;
     }
 
-    if (!currentApi) {
+    const api = resolveApiForTopic(entry.topicId);
+    if (!api) {
       await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Zalo chưa kết nối', replyOpts);
       return;
     }
@@ -2220,7 +2225,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       if (!displayName) {
         try {
           console.log(`[API][WEB] getUserInfo uid=${entityId} source=search_cb_dm fallback=app_empty`);
-          const resp = await currentApi?.getUserInfo(entityId) as {
+          const resp = await (existing ? resolveApiForTopic(existing)?.getUserInfo(entityId) : undefined) as {
             changed_profiles?: Record<string, { displayName?: string; zaloName?: string }>;
             unchanged_profiles?: Record<string, { displayName?: string; zaloName?: string }>;
           } | undefined;
@@ -2293,7 +2298,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
   // Bot phải là admin và allowed_updates phải có "message_reaction"
   tgBot.on('message_reaction', async (ctx) => {
     try {
-      if (!currentApi) return;
+      // Removed currentApi check because we resolve it later
       const update = ctx.messageReaction;
       if (!update) return;
 
@@ -2394,7 +2399,17 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
 
       reactionEchoStore.mark(quote.zaloId, quote.msgId, zaloIcon);
       try {
-        await currentApi.addReaction(
+        // Resolve API based on which account has the topic
+        let targetApi = getAllZaloApis().values().next().value;
+        for (const accId of getAllZaloApis().keys()) {
+          if (store.getTopicByZalo(accId, quote.zaloId, quote.threadType) !== undefined) {
+            targetApi = getAllZaloApis().get(accId);
+            break;
+          }
+        }
+        if (!targetApi) throw new Error('No API available');
+        
+        await targetApi.addReaction(
           zaloIcon as unknown as import('zca-js').Reactions,
           {
             data: { msgId: quote.msgId, cliMsgId: quote.cliMsgId },
@@ -3268,8 +3283,10 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       const poll = ctx.poll;
       if (!poll.is_closed) return;
       const entry = pollStore.getByTgPollUUID(poll.id);
-      if (!entry || !currentApi) return;
-      await doLockPoll(entry, currentApi);
+      if (!entry) return;
+      const api = resolveApiForTopic(entry.tgThreadId);
+      if (!api) return;
+      await doLockPoll(entry, api);
     } catch (err) {
       console.error('[TG→Zalo] lockPoll error:', err);
     }
@@ -3296,8 +3313,8 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
         return;
       }
 
-      if (!currentApi) return;
-      const api = currentApi;
+      const api = resolveApiForTopic(entry.tgThreadId);
+      if (!api) return;
 
       // Map TG 0-based option indices → Zalo option_ids
       const optionIds = answer.option_ids
