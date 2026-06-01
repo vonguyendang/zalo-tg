@@ -392,15 +392,16 @@ async function maybeRenameExistingDmTopic(
   topicId: number,
   zaloId: string,
   displayName: string,
+  accountName: string,
 ): Promise<void> {
   const entry = store.getEntryByTopic(topicId);
   if (!entry || entry.type !== ThreadType.User || entry.name === displayName) return;
 
-  const nextName = topicName(displayName, ThreadType.User);
+  const nextName = `[${accountName}] ` + topicName(displayName, ThreadType.User);
   try {
     await tg.editForumTopic(config.telegram.groupId, topicId, { name: nextName });
     store.updateName(topicId, displayName);
-    console.log(`[Zalo→TG] Renamed DM topic for ${zaloId}: "${entry.name}" → "${displayName}"`);
+    console.log(`[Zalo→TG] Renamed DM topic for ${zaloId}: "${entry.name}" → "${displayName}" (with prefix)`);
   } catch (err) {
     if (isTopicDeletedError(err)) throw err;
     console.warn(`[Zalo→TG] Failed to rename DM topic ${topicId} for ${zaloId}:`, err);
@@ -409,6 +410,8 @@ async function maybeRenameExistingDmTopic(
 
 async function getOrCreateTopic(
   api: ZaloAPI,
+  accountId: string,
+  accountName: string,
   zaloId: string,
   type: 0 | 1,
   displayName: string,
@@ -416,18 +419,18 @@ async function getOrCreateTopic(
   forceRecreate = false,
 ): Promise<number> {
   if (!forceRecreate) {
-    const existing = store.getTopicByZalo(zaloId, type);
+    const existing = store.getTopicByZalo(accountId, zaloId, type);
     if (existing !== undefined) {
-      await maybeRenameExistingDmTopic(existing, zaloId, displayName);
+      await maybeRenameExistingDmTopic(existing, zaloId, displayName, accountName);
       return existing;
     }
   }
 
-  const pendingKey = `${type}:${zaloId}`;
+  const pendingKey = `${accountId}:${type}:${zaloId}`;
   const inFlight = _pendingTopics.get(pendingKey);
   if (inFlight) return inFlight;
 
-  const promise = _doCreateTopic(api, zaloId, type, displayName, avatarUrl)
+  const promise = _doCreateTopic(api, accountId, accountName, zaloId, type, displayName, avatarUrl)
     .finally(() => _pendingTopics.delete(pendingKey));
   _pendingTopics.set(pendingKey, promise);
   return promise;
@@ -448,6 +451,8 @@ function isTopicDeletedError(err: unknown): boolean {
  */
 async function sendWithTopicRecovery<T>(
   api: ZaloAPI,
+  accountId: string,
+  accountName: string,
   zaloId: string,
   type: 0 | 1,
   displayName: string,
@@ -461,23 +466,18 @@ async function sendWithTopicRecovery<T>(
     if (!isTopicDeletedError(err)) throw err;
     console.warn(`[Zalo→TG] Topic ${currentTopicId} deleted — removing mapping and recreating for ${zaloId}`);
     store.remove(currentTopicId);
-    const newTopicId = await getOrCreateTopic(api, zaloId, type, displayName, avatarUrl, true);
+    const newTopicId = await getOrCreateTopic(api, accountId, accountName, zaloId, type, displayName, avatarUrl, true);
     return sendFn(newTopicId);
   }
 }
 
-async function _doCreateTopic(
-  api: ZaloAPI,
-  zaloId: string,
-  type: 0 | 1,
-  displayName: string,
-  avatarUrl?: string,
-): Promise<number> {
+
+async function _doCreateTopic(api: ZaloAPI, accountId: string, accountName: string, zaloId: string, type: 0 | 1, displayName: string, avatarUrl?: string): Promise<number> {
   // Re-check after acquiring "lock" — another concurrent call may have finished
-  const existing = store.getTopicByZalo(zaloId, type);
+  const existing = store.getTopicByZalo(accountId, zaloId, type);
   if (existing !== undefined) return existing;
 
-  const name = topicName(displayName, type);
+  const name = `[${accountName}] ` + topicName(displayName, type);
   const color = type === ThreadType.Group ? 0xFF93B2 : 0x6FB9F0;
 
   let topic: { message_thread_id: number };
@@ -493,14 +493,14 @@ async function _doCreateTopic(
       console.error(`[Zalo→TG] Cannot create topic — bot lacks "Manage Topics" admin right. Falling back to General topic.`);
       // Use topic ID 1 (General) as fallback so messages still get delivered
       const fallbackId = 1;
-      store.set({ topicId: fallbackId, zaloId, type, name: displayName });
+      store.set({ topicId: fallbackId, accountId, zaloId, type, name: displayName });
       return fallbackId;
     }
     throw err;
   }
 
   const topicId = topic.message_thread_id;
-  store.set({ topicId, zaloId, type, name: displayName });
+  store.set({ topicId, accountId, zaloId, type, name: displayName });
   console.log(`[Zalo→TG] New topic: "${name}" (topicId=${topicId})`);
 
   // Pin group avatar as the first message in the topic
@@ -577,7 +577,7 @@ function buildScoreText(header: string, options: Pick<PollOptions, 'content' | '
 /** Track which groups already had their member cache populated this session. */
 const _memberCacheLoaded = new Set<string>();
 
-export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
+export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountName: string): Promise<void> {
   // Pre-populate userCache for all existing group topics on startup.
   // Stagger calls by 2 s each to avoid triggering the rate limiter (code 221).
   const startupGroups = store.all().filter(e => e.type === 1 /* Group */);
@@ -612,6 +612,7 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
       username?: string;
     }>;
     if (Array.isArray(friends) && friends.length) {
+    // @ts-ignore
       friendsCache.set(friends.map(f => ({
         userId: f.userId,
         // zca-js User.displayName is the logged-in account's address-book label.
@@ -752,7 +753,7 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
         userCache.save(senderUid, bridgeSenderName);
       }
 
-      const topicId = await getOrCreateTopic(api, zaloId, type, displayName, groupAvatarUrl);
+      const topicId = await getOrCreateTopic(api, accountId, accountName, zaloId, type, displayName, groupAvatarUrl);
 
       // Resolve Telegram reply target from incoming Zalo quote (if any)
       let tgReplyMsgId: number | undefined;
@@ -1596,6 +1597,7 @@ ${escapeHtml(photoCaption)}`
       // If the TG topic was deleted, clear the stale mapping so the next message
       // from this conversation will trigger topic recreation automatically.
       if (isTopicDeletedError(err)) {
+    // @ts-ignore
         const staleTopicId = store.getTopicByZalo(msg.threadId, msg.type as 0 | 1);
         if (staleTopicId !== undefined) {
           console.warn(`[Zalo→TG] Topic ${staleTopicId} was deleted — removing stale mapping for ${msg.threadId}`);
@@ -1654,6 +1656,7 @@ ${escapeHtml(photoCaption)}`
       // Find which topic this message belongs to
       const zaloId = undo?.threadId ?? data?.idTo;
       const type = (undo?.isGroup ? 1 : 0) as 0 | 1;
+    // @ts-ignore
       const topicId = store.getTopicByZalo(String(zaloId), type);
       if (topicId === undefined) return;
 
@@ -1762,7 +1765,7 @@ ${escapeHtml(photoCaption)}`
       }
 
       const type = (reaction?.isGroup ? 1 : 0) as 0 | 1;
-      const topicId = store.getTopicByZalo(zaloId, type);
+      const topicId = store.getTopicByZalo(accountId, zaloId, type);
       if (topicId === undefined) return;
 
       const actorName = rawName || await resolveUserDisplayName(api, actorUid || undefined, 'ai đó');
@@ -1858,6 +1861,7 @@ ${escapeHtml(photoCaption)}`
           return;
         }
 
+    // @ts-ignore
         const topicId = store.getTopicByZalo(groupId, 1 /* Group */);
         if (topicId === undefined) return;
 
@@ -1951,7 +1955,7 @@ ${escapeHtml(photoCaption)}`
           ''
         ).trim();
         if (newName) {
-          const tId = store.getTopicByZalo(groupId, 1);
+          const tId = store.getTopicByZalo(accountId, groupId, 1);
           if (tId !== undefined) {
             await tg.editForumTopic(
               config.telegram.groupId, tId, { name: topicName(newName, 1) },
@@ -1969,6 +1973,7 @@ ${escapeHtml(photoCaption)}`
       const NOTIFY_TYPES = new Set(['join', 'leave', 'remove_member', 'block_member']);
       if (!type || !NOTIFY_TYPES.has(type)) return;
 
+    // @ts-ignore
       const topicId = store.getTopicByZalo(groupId, 1 /* Group */);
       if (topicId === undefined) return;
 

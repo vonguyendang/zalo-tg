@@ -15,6 +15,7 @@ mkdir -p "$APP_DIR" "$HOME/Library/LaunchAgents" "$LOG_DIR"
 
 load_settings() {
   LOG_RETENTION_DAYS=7
+  BOT_BRANCH="multi-zalo"
   if [[ -f "$SETTINGS_FILE" ]]; then
     # shellcheck source=/dev/null
     source "$SETTINGS_FILE"
@@ -24,6 +25,7 @@ load_settings() {
 save_settings() {
   cat > "$SETTINGS_FILE" <<EOF
 LOG_RETENTION_DAYS=$LOG_RETENTION_DAYS
+BOT_BRANCH="$BOT_BRANCH"
 EOF
 }
 
@@ -63,7 +65,8 @@ if [[ "\$LOG_RETENTION_DAYS" -gt 0 ]]; then
   echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Dọn log cũ hơn \${LOG_RETENTION_DAYS} ngày: xóa \${deleted} file." >> "\$LOG_DIR/cleanup.log"
 fi
 
-/usr/bin/git checkout dev >> "\$LOG_DIR/git.log" 2>&1
+if [[ -f "\$SETTINGS_FILE" ]]; then source "\$SETTINGS_FILE"; fi
+/usr/bin/git checkout "${BOT_BRANCH:-multi-zalo}" >> "\$LOG_DIR/git.log" 2>&1
 /usr/bin/pkill telegram-bot-api 2>/dev/null || true
 npm run build >> "\$LOG_DIR/build.log" 2>&1
 
@@ -127,6 +130,16 @@ cat > "$PLIST" <<PLISTEOF
 PLISTEOF
 }
 
+# ── Gọi hàm trực tiếp từ argument ─────────────────────────────────────────────
+if [[ $# -gt 0 ]]; then
+  case "$1" in
+    start_bot_silent) start_bot silent ;;
+    stop_bot_silent) stop_bot silent ;;
+    restart_bot_silent) restart_bot silent ;;
+  esac
+  exit 0
+fi
+
 # ── Các thao tác chính ─────────────────────────────────────────────────────────
 
 is_loaded() {
@@ -134,23 +147,30 @@ is_loaded() {
 }
 
 start_bot() {
+  local silent="${1:-}"
   clean_old_logs
   write_run_script
   write_plist
   launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
   launchctl bootstrap "gui/$(id -u)" "$PLIST"
   launchctl kickstart -k "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
-  osascript -e 'display dialog "Đã bật bot thành công.\n\nBot sẽ tự chạy khi bạn đăng nhập.\nLog cũ sẽ tự xóa theo lịch đã cấu hình." buttons {"OK"} default button "OK" with title "Zalo Bot Control"'
+  if [[ "$silent" != "silent" ]]; then
+    osascript -e 'display dialog "Đã bật bot thành công.\n\nBot sẽ tự chạy khi bạn đăng nhập.\nLog cũ sẽ tự xóa theo lịch đã cấu hình." buttons {"OK"} default button "OK" with title "Zalo Bot Control"'
+  fi
 }
 
 stop_bot() {
+  local silent="${1:-}"
   launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
   /usr/bin/pkill -f 'node dist/index.js' >/dev/null 2>&1 || true
   /usr/bin/pkill telegram-bot-api >/dev/null 2>&1 || true
-  osascript -e 'display dialog "Đã tắt bot." buttons {"OK"} default button "OK" with title "Zalo Bot Control"'
+  if [[ "$silent" != "silent" ]]; then
+    osascript -e 'display dialog "Đã tắt bot." buttons {"OK"} default button "OK" with title "Zalo Bot Control"'
+  fi
 }
 
 restart_bot() {
+  local silent="${1:-}"
   launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
   /usr/bin/pkill -f 'node dist/index.js' >/dev/null 2>&1 || true
   /usr/bin/pkill telegram-bot-api >/dev/null 2>&1 || true
@@ -159,7 +179,9 @@ restart_bot() {
   write_plist
   launchctl bootstrap "gui/$(id -u)" "$PLIST"
   launchctl kickstart -k "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
-  osascript -e 'display dialog "Đã khởi động lại bot thành công." buttons {"OK"} default button "OK" with title "Zalo Bot Control"'
+  if [[ "$silent" != "silent" ]]; then
+    osascript -e 'display dialog "Đã khởi động lại bot thành công." buttons {"OK"} default button "OK" with title "Zalo Bot Control"'
+  fi
 }
 
 show_status() {
@@ -211,6 +233,30 @@ OSA
   fi
 }
 
+
+set_branch() {
+  local current="$BOT_BRANCH"
+  local input
+  input=$(osascript <<OSA
+set branchName to text returned of (display dialog "Nhập tên nhánh (branch) để chạy bot:\n\nHiện tại: $current" default answer "$current" buttons {"Hủy", "Lưu"} default button "Lưu" cancel button "Hủy" with title "Zalo Bot Control – Đổi nhánh")
+return branchName
+OSA
+  ) || return 0
+
+  if [[ -z "$input" ]]; then
+    osascript -e 'display dialog "Tên nhánh không được để trống." buttons {"OK"} default button "OK" with title "Zalo Bot Control"'
+    return 1
+  fi
+
+  BOT_BRANCH="$input"
+  save_settings
+
+  osascript <<OSA
+display dialog "Đã lưu nhánh mới: $BOT_BRANCH\n\nBot sẽ được khởi động lại với nhánh này." buttons {"OK"} default button "OK" with title "Zalo Bot Control"
+OSA
+  restart_bot
+}
+
 clean_logs_now() {
   clean_old_logs
   osascript <<OSA
@@ -229,14 +275,14 @@ display dialog "Cách dùng:
 4. Chọn Mở log để xem lỗi.
 5. Chọn Tắt bot để dừng.
 6. Chọn Cấu hình xóa log để đặt số ngày giữ log.
-7. Chọn Xóa log ngay để dọn log cũ thủ công." buttons {"OK"} default button "OK" with title "Zalo Bot Control"
+7. Chọn Xóa log ngay để dọn log cũ thủ công.\n8. Chọn Cấu hình nhánh để đổi branch." buttons {"OK"} default button "OK" with title "Zalo Bot Control"
 OSA
 }
 
 # ── Menu chính ──────────────────────────────────────────────────────────────────
 
 CHOICE=$(osascript <<'OSA'
-set picked to choose from list {"Bật bot", "Khởi động lại bot", "Tắt bot", "Xem trạng thái", "Mở log", "Cấu hình xóa log", "Xóa log ngay", "Hướng dẫn"} with prompt "Chọn thao tác:" with title "Zalo Bot Control" default items {"Bật bot"} OK button name "Chọn" cancel button name "Thoát"
+set picked to choose from list {"Bật bot", "Khởi động lại bot", "Tắt bot", "Xem trạng thái", "Mở log", "Cấu hình xóa log", "Xóa log ngay", "Cấu hình nhánh", "Hướng dẫn"} with prompt "Chọn thao tác:" with title "Zalo Bot Control" default items {"Bật bot"} OK button name "Chọn" cancel button name "Thoát"
 if picked is false then
 	return "Thoát"
 else
@@ -253,6 +299,7 @@ case "$CHOICE" in
   "Mở log")            open_logs ;;
   "Cấu hình xóa log")  set_log_retention ;;
   "Xóa log ngay")      clean_logs_now ;;
+  "Cấu hình nhánh")    set_branch ;;
   "Hướng dẫn")         show_help ;;
   *)                   exit 0 ;;
 esac

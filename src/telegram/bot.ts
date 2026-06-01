@@ -2,6 +2,7 @@ import { Telegraf } from 'telegraf';
 import https from 'https';
 import http from 'http';
 import { config } from '../config.js';
+import { createProxyAgent } from '../proxy.js';
 
 // Force IPv4 to avoid ETIMEDOUT on systems where IPv6 is blocked/unreachable
 const agent = new https.Agent({ family: 4 });
@@ -11,7 +12,12 @@ const BOT_COMMANDS = [
   { command: 'login',          description: 'Đăng nhập Zalo bằng QR (Web API)' },
   { command: 'loginweb',       description: 'Đăng nhập Zalo bằng QR (Web API, giống /login)' },
   { command: 'loginapp',       description: 'Đăng nhập Zalo bằng QR (PC App API)' },
+  { command: 'accounts',       description: 'Xem danh sách tài khoản đang đăng nhập' },
+  { command: 'logout',         description: 'Đăng xuất tài khoản khỏi hệ thống' },
   { command: 'search',         description: 'Tìm tên, nhóm hoặc số điện thoại' },
+  { command: 'history',        description: 'Đồng bộ lịch sử chat cũ từ Zalo' },
+  { command: 'call',           description: 'Gọi điện thoại Zalo' },
+  { command: 'callgroup',      description: 'Gọi nhóm Zalo' },
   { command: 'group_info',     description: 'Xem thông tin & thành viên nhóm Zalo hiện tại' },
   { command: 'group_infoall',  description: 'Xem toàn bộ thành viên nhóm Zalo hiện tại' },
   { command: 'recall',         description: 'Thu hồi tin nhắn đã gửi sang Zalo' },
@@ -23,14 +29,23 @@ const BOT_COMMANDS = [
   { command: 'leavegroup',     description: 'Rời nhóm Zalo của topic hiện tại' },
   { command: 'status',         description: 'Xem trạng thái kết nối & thống kê bridge' },
   { command: 'admin',          description: 'Admin panel: trạng thái, cache, tra mapping' },
+  { command: 'proxy',          description: 'Cài đặt proxy (SOCKS5/HTTP) cho tài khoản Zalo' },
   { command: 'update',         description: 'Kiểm tra bản cập nhật mới cho bridge' },
+  { command: 'reconnect',      description: 'Kết nối lại Zalo bằng session cũ (khi bị ngắt)' },
+  { command: 'setalias',       description: 'Đặt bí danh (alias) cho một tài khoản Zalo' },
 ];
+
+let agentToUse: https.Agent | http.Agent = agent;
+if (config.telegram.proxy) {
+  const proxyAgent = createProxyAgent(config.telegram.proxy);
+  if (proxyAgent) agentToUse = proxyAgent as https.Agent;
+}
 
 /** Singleton Telegraf bot instance shared across the app. */
 export const tgBot = new Telegraf(config.telegram.token, {
   telegram: config.telegram.localServer
     ? { apiRoot: config.telegram.localServer, agent: localAgent }
-    : { agent },
+    : { agent: agentToUse },
 });
 
 export async function syncTelegramCommands(): Promise<void> {

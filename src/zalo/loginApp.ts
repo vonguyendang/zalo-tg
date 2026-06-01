@@ -201,7 +201,7 @@ export interface AppLoginHooks extends QRLoginHooks {
  *
  * @param hooks  Optional callbacks (forward QR image / status to Telegram).
  */
-export async function triggerAppLogin(hooks: AppLoginHooks = {}): Promise<ZaloAPI> {
+export async function triggerAppLogin(hooks: AppLoginHooks = {}): Promise<{api: ZaloAPI, uid: string}> {
   const jar     = new CookieJar();
   const session = createSession(jar);
   const imei    = crypto.randomUUID() + '-' + crypto.createHash('md5').update(PC_UA).digest('hex');
@@ -307,18 +307,18 @@ export async function triggerAppLogin(hooks: AppLoginHooks = {}): Promise<ZaloAP
   const credentials = { imei, cookie: cookies, userAgent: PC_UA };
 
   // Persist so the bridge can auto-login on next restart
-  mkdirSync(path.dirname(config.zalo.credentialsPath), { recursive: true });
+  mkdirSync(config.zalo.credentialsDir, { recursive: true });
   writeFileSync(
-    config.zalo.credentialsPath,
+    path.join(config.zalo.credentialsDir, 'credentials_app.json'),
     JSON.stringify(credentials, null, 2),
     'utf8',
   );
-  console.log(`[AppLogin] Credentials saved → ${config.zalo.credentialsPath}`);
+  console.log(`[AppLogin] Credentials saved → ${path.join(config.zalo.credentialsDir, 'credentials_app.json')}`);
 
   // Save app-session.json with zpw_enk + raw zaloapp.com cookies for direct PC App API calls
   const zpwEnk = String(loginData['zpw_enk'] ?? '');
   if (zpwEnk) {
-    const appSessionPath = path.join(path.dirname(config.zalo.credentialsPath), 'app-session.json');
+    const appSessionPath = path.join(config.zalo.credentialsDir, 'app-session.json');
     writeFileSync(
       appSessionPath,
       JSON.stringify({ zpw_enk: zpwEnk, imei, cookies: jar.toRawPairs() }, null, 2),

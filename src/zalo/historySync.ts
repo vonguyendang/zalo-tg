@@ -15,7 +15,7 @@ import type { ZaloAPI } from './types.js';
 import { ZALO_MSG_TYPES } from './types.js';
 import { tgBot } from '../telegram/bot.js';
 import { config } from '../config.js';
-import { msgStore, userCache, aliasCache, friendsCache, type ZaloQuoteData } from '../store.js';
+import { msgStore, userCache, aliasCache, friendsCache, store, type ZaloQuoteData } from '../store.js';
 import { downloadToTemp, cleanTemp } from '../utils/media.js';
 import {
   applyZaloMarkupHtml,
@@ -441,6 +441,20 @@ export async function syncGroupHistory(
     try {
       await tg.deleteMessage(config.telegram.groupId, headerMsgId);
     } catch { /* ignore */ }
+  }
+
+  if (forwarded > 0) {
+    const topic = store.getEntryByTopic(topicId);
+    const groupName = topic ? topic.name : groupId;
+    try {
+      await tg.sendMessage(
+        config.telegram.groupId,
+        `✅ <b>History Sync</b>: Đã đồng bộ <b>${forwarded}</b> tin nhắn cũ cho nhóm <b>${escapeHtml(groupName)}</b>.`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (e) {
+      console.error('[HistorySync] Failed to send notification to telegram group', e);
+    }
   }
 
   console.log(`[HistorySync] Done: forwarded ${forwarded}/${toSync.length} messages for group=${groupId}`);

@@ -1,8 +1,10 @@
 import { Zalo, LoginQRCallbackEventType } from 'zca-js';
 import type { LoginQRCallback } from 'zca-js';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, statSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, statSync } from 'fs';
 import os from 'os';
 import path from 'path';
+import fetch from 'node-fetch';
+import { createProxyAgent } from '../proxy.js';
 import { imageSizeFromFile } from 'image-size/fromFile';
 import qrcode from 'qrcode-terminal';
 import { config } from '../config.js';
@@ -14,7 +16,8 @@ const QR_TMP_DIR = path.join(os.tmpdir(), 'zalo-tg');
 mkdirSync(QR_TMP_DIR, { recursive: true });
 const QR_IMAGE_PATH = path.join(QR_TMP_DIR, 'zalo-qr.png');
 
-let _api: ZaloAPI | null = null;
+// Pool of Zalo API instances
+const _apis = new Map<string, ZaloAPI>();
 
 // ── imageMetadataGetter ───────────────────────────────────────────────────────
 // Required by zca-js for uploadAttachment (images/GIFs).
@@ -50,14 +53,35 @@ export interface QRLoginHooks {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function saveCredentials(data: { cookie: unknown; imei: string; userAgent: string }): void {
+function getCredentialPath(uid?: string): string {
+  if (!existsSync(config.zalo.credentialsDir)) {
+    mkdirSync(config.zalo.credentialsDir, { recursive: true });
+  }
+  if (!uid) {
+    return path.join(config.zalo.credentialsDir, `credentials_tmp_${Date.now()}.json`);
+  }
+  return path.join(config.zalo.credentialsDir, `credentials_${uid}.json`);
+}
+
+function saveCredentials(data: { cookie: unknown; imei: string; userAgent: string; proxy?: string }, uid: string): void {
   try {
-    writeFileSync(
-      config.zalo.credentialsPath,
-      JSON.stringify({ imei: data.imei, cookie: data.cookie, userAgent: data.userAgent }, null, 2),
-      'utf8',
-    );
-    console.log(`[Zalo] Credentials saved → ${config.zalo.credentialsPath}`);
+    const credPath = getCredentialPath(uid);
+    // Preserve existing proxy if updating credentials without specifying proxy
+    let existingProxy: string | undefined;
+    if (existsSync(credPath)) {
+      try {
+        const oldCreds = JSON.parse(readFileSync(credPath, 'utf8'));
+        existingProxy = oldCreds.proxy;
+      } catch (e) {
+        // ignore
+      }
+    }
+    const proxyToSave = data.proxy !== undefined ? data.proxy : existingProxy;
+    const toSave: any = { imei: data.imei, cookie: data.cookie, userAgent: data.userAgent };
+    if (proxyToSave) toSave.proxy = proxyToSave;
+    
+    writeFileSync(credPath, JSON.stringify(toSave, null, 2), 'utf8');
+    console.log(`[Zalo] Credentials saved → ${credPath}`);
   } catch (err) {
     console.error('[Zalo] Failed to save credentials:', err);
   }
@@ -72,7 +96,9 @@ function saveCredentials(data: { cookie: unknown; imei: string; userAgent: strin
 async function runQRLogin(
   zalo: InstanceType<typeof Zalo>,
   hooks: QRLoginHooks = {},
-): Promise<ZaloAPI> {
+): Promise<{api: ZaloAPI, uid: string}> {
+  let tempCredentials: any = null;
+
   const callback: LoginQRCallback = (event) => {
     switch (event.type) {
 
@@ -125,7 +151,7 @@ async function runQRLogin(
       }
 
       case LoginQRCallbackEventType.GotLoginInfo: {
-        saveCredentials(event.data);
+        tempCredentials = event.data;
         void hooks.onSuccess?.().catch((e: unknown) => console.error(e));
         break;
       }
@@ -134,40 +160,48 @@ async function runQRLogin(
 
   const api = await zalo.loginQR({ qrPath: QR_IMAGE_PATH }, callback);
   if (!api) throw new Error('[Zalo] QR login failed – no API returned.');
+  
+  const uid = api.getOwnId?.();
+  if (!uid) throw new Error('[Zalo] QR login failed – could not get own UID.');
+  const loggedInUid = String(uid);
+  
+  if (tempCredentials) saveCredentials(tempCredentials, loggedInUid);
+  
   console.log('\n[Zalo] Đăng nhập thành công ✓');
-  return api as ZaloAPI;
+  return {api: api as ZaloAPI, uid: loggedInUid};
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/**
- * Return (and lazily initialise) the Zalo API singleton.
- * Only uses saved credentials — does NOT fall back to QR login.
- * If credentials are missing or invalid, throws so the caller can notify
- * the user (e.g. via Telegram) to run /login.
- */
-/** Clear the cached API instance so the next `getZaloApi()` call re-authenticates. */
-export function resetZaloApi(): void {
-  _api = null;
+export function getZaloApi(accountId: string): ZaloAPI | undefined {
+  return _apis.get(accountId);
 }
 
-/** Delete stale credentials file so the next boot can do a fresh QR login. */
-export function clearCredentials(): void {
+export function getAllZaloApis(): Map<string, ZaloAPI> {
+  return _apis;
+}
+
+/** Delete stale credentials file for a specific account. */
+export function clearCredentials(accountId: string): void {
   try {
-    if (existsSync(config.zalo.credentialsPath)) {
-      unlinkSync(config.zalo.credentialsPath);
-      console.log('[Zalo] Đã xoá credentials cũ (session hết hạn).');
+    const p = getCredentialPath(accountId);
+    if (existsSync(p)) {
+      unlinkSync(p);
+      console.log(`[Zalo] Đã xoá credentials cũ của ${accountId}.`);
     }
+    _apis.delete(accountId);
   } catch (err) {
-    console.warn('[Zalo] Không thể xoá credentials cũ:', err);
+    console.warn(`[Zalo] Không thể xoá credentials cũ của ${accountId}:`, err);
   }
 }
 
 /** Sentinel error thrown when saved credentials are stale — caller should trigger QR re-login. */
 export class StaleCredentialsError extends Error {
-  constructor(cause: unknown) {
-    super('Credentials Zalo đã hết hạn — cần đăng nhập lại qua QR.');
+  public accountId: string;
+  constructor(accountId: string, cause: unknown) {
+    super(`Credentials Zalo của tài khoản ${accountId} đã hết hạn — cần đăng nhập lại.`);
     this.name = 'StaleCredentialsError';
+    this.accountId = accountId;
     this.cause = cause;
   }
 }
@@ -186,44 +220,62 @@ function isAuthError(err: unknown): boolean {
   return false;
 }
 
-export async function getZaloApi(): Promise<ZaloAPI> {
-  if (_api) return _api;
-
-  if (!existsSync(config.zalo.credentialsPath)) {
-    throw new Error('Chưa có file credentials.json — hãy gửi /login trong Telegram để đăng nhập lần đầu.');
+export async function initAllZaloApis(): Promise<{apis: Map<string, ZaloAPI>, expired: string[]}> {
+  if (!existsSync(config.zalo.credentialsDir)) {
+    mkdirSync(config.zalo.credentialsDir, { recursive: true });
   }
 
-  const zalo = new Zalo(ZALO_OPTIONS);
+  const files = readdirSync(config.zalo.credentialsDir).filter(f => f.startsWith('credentials_') && f.endsWith('.json'));
+  const expired: string[] = [];
 
-  const credentials = JSON.parse(
-    readFileSync(config.zalo.credentialsPath, 'utf8'),
-  ) as { imei: string; cookie: unknown; userAgent: string };
+  for (const file of files) {
+    const credPath = path.join(config.zalo.credentialsDir, file);
+    const match = file.match(/^credentials_(.+)\.json$/);
+    if (!match) continue;
+    const accountId = match[1];
 
-  console.log('[Zalo] Đang đăng nhập bằng credentials đã lưu...');
-  try {
-    _api = (await zalo.login(credentials as Parameters<typeof zalo.login>[0])) as ZaloAPI;
-  } catch (err) {
-    if (isAuthError(err)) {
-      console.warn('[Zalo] Session hết hạn (auth error), đang xoá credentials cũ...');
-      clearCredentials();
-      _api = null;
-      throw new StaleCredentialsError(err);
+    try {
+      const credentials = JSON.parse(readFileSync(credPath, 'utf8'));
+      
+      const zaloOpts: any = { ...ZALO_OPTIONS };
+      if (credentials.proxy) {
+        const agent = createProxyAgent(credentials.proxy);
+        if (agent) {
+          zaloOpts.options = { 
+            ...zaloOpts.options, 
+            agent,
+            polyfill: (url: any, init: any) => fetch(url, { ...init, agent })
+          };
+          console.log(`[Zalo] Dùng proxy ${credentials.proxy} cho tài khoản ${accountId}`);
+        }
+      }
+      const zalo = new Zalo(zaloOpts);
+      
+      console.log(`[Zalo] Đang đăng nhập tài khoản ${accountId}...`);
+      const api = (await zalo.login(credentials)) as ZaloAPI;
+      _apis.set(accountId, api);
+      console.log(`[Zalo] Tài khoản ${accountId} đăng nhập thành công ✓`);
+    } catch (err) {
+      if (isAuthError(err)) {
+        console.warn(`[Zalo] Session của ${accountId} hết hạn (auth error).`);
+        clearCredentials(accountId);
+        expired.push(accountId);
+      } else {
+        console.error(`[Zalo] Lỗi đăng nhập tài khoản ${accountId}:`, err);
+      }
     }
-    throw err;
   }
-  console.log('[Zalo] Đăng nhập thành công ✓');
 
-  return _api as ZaloAPI;
+  return {apis: _apis, expired};
 }
 
 /**
  * Trigger a fresh QR login (e.g. from /login Telegram command).
- * Resets the cached API so the next `getZaloApi()` call will re-initialise.
  * Accepts optional hooks so the caller can forward QR images / status updates.
  */
-export async function triggerQRLogin(hooks: QRLoginHooks = {}): Promise<ZaloAPI> {
-  _api = null;
+export async function triggerQRLogin(hooks: QRLoginHooks = {}): Promise<{api: ZaloAPI, uid: string}> {
   const zalo = new Zalo(ZALO_OPTIONS);
-  _api = await runQRLogin(zalo, hooks);
-  return _api;
+  const result = await runQRLogin(zalo, hooks);
+  _apis.set(result.uid, result.api);
+  return result;
 }

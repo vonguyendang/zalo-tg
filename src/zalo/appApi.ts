@@ -37,7 +37,7 @@ let _session: AppSession | null | undefined;  // undefined = not yet loaded
 
 function loadAppSession(): AppSession | null {
   if (_session !== undefined) return _session;
-  const p = path.join(path.dirname(config.zalo.credentialsPath), 'app-session.json');
+  const p = path.join(config.zalo.credentialsDir, 'app-session.json');
   if (!existsSync(p)) { _session = null; return null; }
   try {
     _session = JSON.parse(readFileSync(p, 'utf8')) as AppSession;

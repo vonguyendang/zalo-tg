@@ -1,0 +1,79 @@
+diff --git a/node_modules/zca-js/dist/apis/listen.js b/node_modules/zca-js/dist/apis/listen.js
+index ce5d95e..b734125 100644
+--- a/node_modules/zca-js/dist/apis/listen.js
++++ b/node_modules/zca-js/dist/apis/listen.js
+@@ -172,7 +172,7 @@ export class Listener extends EventEmitter {
+                         ping();
+                     }, this.ctx.settings.features.socket.ping_interval);
+                 }
+-                if (version == 1 && cmd == 501 && subCmd == 0) {
++                if (version == 1 && cmd == 501) {
+                     const parsedData = (await decodeEventData(parsed, this.cipherKey)).data;
+                     const { msgs } = parsedData;
+                     for (const msg of msgs) {
+@@ -191,7 +191,7 @@ export class Listener extends EventEmitter {
+                         }
+                     }
+                 }
+-                if (version == 1 && cmd == 521 && subCmd == 0) {
++                if (version == 1 && cmd == 521) {
+                     const parsedData = (await decodeEventData(parsed, this.cipherKey)).data;
+                     const { groupMsgs } = parsedData;
+                     for (const msg of groupMsgs) {
+diff --git a/node_modules/zca-js/dist/cjs/apis/listen.cjs b/node_modules/zca-js/dist/cjs/apis/listen.cjs
+index 92ab353..0ba3576 100644
+--- a/node_modules/zca-js/dist/cjs/apis/listen.cjs
++++ b/node_modules/zca-js/dist/cjs/apis/listen.cjs
+@@ -110,7 +110,7 @@ class Listener extends EventEmitter {
+     start({ retryOnClose = false } = {}) {
+         if (this.ws)
+             throw new ZaloApiError.ZaloApiError("Already started");
+-        const ws = new WebSocket(this.wsURL, {
++        const wsOptions = {
+             headers: {
+                 "accept-encoding": "gzip, deflate, br, zstd",
+                 "accept-language": "en-US,en;q=0.9",
+@@ -125,8 +125,11 @@ class Listener extends EventEmitter {
+                 "user-agent": this.userAgent,
+                 cookie: this.cookie,
+             },
+-            agent: this.ctx.options.agent
+-        });
++        };
++        if (this.ctx.options.agent) {
++            wsOptions.agent = this.ctx.options.agent;
++        }
++        const ws = new WebSocket(this.wsURL, wsOptions);
+         this.ws = ws;
+         ws.onopen = () => {
+             this.onConnectedCallback();
+@@ -184,7 +187,7 @@ class Listener extends EventEmitter {
+                         ping();
+                     }, this.ctx.settings.features.socket.ping_interval);
+                 }
+-                if (version == 1 && cmd == 501 && subCmd == 0) {
++                if (version == 1 && cmd == 501) {
+                     const parsedData = (await utils.decodeEventData(parsed, this.cipherKey)).data;
+                     const { msgs } = parsedData;
+                     for (const msg of msgs) {
+@@ -203,7 +206,7 @@ class Listener extends EventEmitter {
+                         }
+                     }
+                 }
+-                if (version == 1 && cmd == 521 && subCmd == 0) {
++                if (version == 1 && cmd == 521) {
+                     const parsedData = (await utils.decodeEventData(parsed, this.cipherKey)).data;
+                     const { groupMsgs } = parsedData;
+                     for (const msg of groupMsgs) {
+diff --git a/node_modules/zca-js/dist/cjs/context.cjs b/node_modules/zca-js/dist/cjs/context.cjs
+index aa2c571..8ce7a92 100644
+--- a/node_modules/zca-js/dist/cjs/context.cjs
++++ b/node_modules/zca-js/dist/cjs/context.cjs
+@@ -21,6 +21,7 @@ const createContext = (apiType = 30, apiVersion = 671) => ({
+         checkUpdate: true,
+         logging: true,
+         polyfill: global.fetch,
++        agent: null,
+     },
+     secretKey: null,
+ });

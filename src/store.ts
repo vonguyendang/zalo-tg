@@ -18,16 +18,16 @@ export function markRecalled(msgId: string): void {
 
 export interface TopicEntry {
   topicId: number;
-  zaloId: string;   // threadId (UID for DMs, groupId for groups)
-  type: 0 | 1;    // 0 = ThreadType.User, 1 = ThreadType.Group
-  name: string;   // contact name or group name
+  zaloId: string;
+  type: 0 | 1;
+  name: string;
+  accountId?: string;
 }
 
 interface StoreData {
-  /** topicId (as string key) → entry */
   topics: Record<string, TopicEntry>;
-  /** `${type}:${zaloId}` → topicId */
   zaloIndex: Record<string, number>;
+  accountAliases?: Record<string, string>;
 }
 
 // ── Internal ──────────────────────────────────────────────────────────────────
@@ -50,8 +50,8 @@ function persist(data: StoreData): void {
   renameSync(tmpPath, filePath);
 }
 
-function zaloKey(zaloId: string, type: 0 | 1): string {
-  return `${type}:${zaloId}`;
+function zaloKey(accountId: string | undefined, zaloId: string, type: 0 | 1): string {
+  return `${accountId || 'default'}:${type}:${zaloId}`;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -60,8 +60,8 @@ let _data: StoreData = load();
 
 export const store = {
   /** Find an existing Telegram topic ID for a given Zalo conversation. */
-  getTopicByZalo(zaloId: string, type: 0 | 1): number | undefined {
-    return _data.zaloIndex[zaloKey(zaloId, type)];
+  getTopicByZalo(accountId: string | undefined, zaloId: string, type: 0 | 1): number | undefined {
+    return _data.zaloIndex[zaloKey(accountId, zaloId, type)] ?? _data.zaloIndex[`default:${type}:${zaloId}`];
   },
 
   /** Look up the Zalo conversation linked to a Telegram topic. */
@@ -72,7 +72,7 @@ export const store = {
   /** Persist a new topic ↔ Zalo mapping. */
   set(entry: TopicEntry): void {
     _data.topics[String(entry.topicId)] = entry;
-    _data.zaloIndex[zaloKey(entry.zaloId, entry.type)] = entry.topicId;
+    _data.zaloIndex[zaloKey(entry.accountId, entry.zaloId, entry.type)] = entry.topicId;
     persist(_data);
   },
 
@@ -90,11 +90,27 @@ export const store = {
   },
 
   /** Remove a mapping by Telegram topicId. Returns the removed entry or undefined. */
+  migrateDefaultAccount(realAccountId: string): void {
+    let changed = false;
+    for (const [topicId, entry] of Object.entries(_data.topics)) {
+      if (entry.accountId === 'default') {
+        const oldKey = `default:${entry.type}:${entry.zaloId}`;
+        if (_data.zaloIndex[oldKey] === entry.topicId) delete _data.zaloIndex[oldKey];
+        entry.accountId = realAccountId;
+        _data.zaloIndex[zaloKey(realAccountId, entry.zaloId, entry.type)] = entry.topicId;
+        changed = true;
+      }
+    }
+    if (changed) {
+      persist(_data);
+      console.log(`[Store] Migrated default topics to ${realAccountId}`);
+    }
+  },
   remove(topicId: number): TopicEntry | undefined {
     const entry = _data.topics[String(topicId)];
     if (!entry) return undefined;
     delete _data.topics[String(topicId)];
-    const key = zaloKey(entry.zaloId, entry.type);
+    const key = zaloKey(entry.accountId, entry.zaloId, entry.type);
     if (_data.zaloIndex[key] === topicId) {
       delete _data.zaloIndex[key];
     }
@@ -539,6 +555,17 @@ const _aliasMap = new Map<string, string>();
 /** normalised alias → userId (reverse lookup for mention resolution) */
 const _aliasNormToUid = new Map<string, string>();
 
+export const accountAliasStore = {
+  get(accountId: string): string | undefined {
+    return _data.accountAliases ? _data.accountAliases[accountId] : undefined;
+  },
+  set(accountId: string, alias: string): void {
+    if (!_data.accountAliases) _data.accountAliases = {};
+    _data.accountAliases[accountId] = alias;
+    persist(_data);
+  }
+};
+
 export const aliasCache = {
   /** Bulk-load from getAliasList response */
   setAll(items: Array<{ userId: string; alias: string }>): void {
@@ -589,7 +616,8 @@ export const aliasCache = {
 export interface ZaloFriend {
   userId: string;
   displayName: string;
-  /** tên danh bạ (alias), nếu có */
+  avatar: string;
+  accountId?: string;
   alias?: string;
 }
 
@@ -648,7 +676,9 @@ export const friendsCache = {
 export interface ZaloGroup {
   groupId: string;
   name: string;
+  avatar: string;
   totalMember: number;
+  accountId?: string;
 }
 
 const GROUPS_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -683,6 +713,7 @@ export const groupsCache = {
 // ── Sent message store (TG→Zalo direction) ────────────────────────────────────
 
 export interface SentMsgInfo {
+  accountId?: string;
   /** Zalo msgId(s) returned by api.sendMessage / api.sendVoice.
    *  Có thể nhiều msgId khi gửi album (mỗi file là một tin Zalo riêng). */
   msgIds: (string | number)[];
