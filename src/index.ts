@@ -97,8 +97,7 @@ async function startZalo(
           let totalSynced = 0;
           for (const g of groups) {
             try {
-    // @ts-ignore
-              const n = await syncGroupHistory(api, accountId, g.zaloId, g.topicId, { 
+              const n = await syncGroupHistory(api, g.zaloId, g.topicId, { 
                 count: 30, 
                 delayMs: config.zalo.historySyncDelayMs || 2000 
               });

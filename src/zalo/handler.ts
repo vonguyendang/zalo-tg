@@ -1879,8 +1879,8 @@ ${escapeHtml(photoCaption)}`
               parse_mode: 'HTML',
               reply_markup: {
                 inline_keyboard: [[
-                  { text: '✅ Duyệt', callback_data: `gm:approve:${groupId}:${uid}` },
-                  { text: '❌ Từ chối', callback_data: `gm:reject:${groupId}:${uid}` },
+                  { text: '✅ Duyệt', callback_data: `gm:approve:${accountId}:${groupId}:${uid}` },
+                  { text: '❌ Từ chối', callback_data: `gm:reject:${accountId}:${groupId}:${uid}` },
                 ]],
               },
             },
@@ -2030,8 +2030,8 @@ ${escapeHtml(photoCaption)}`
           parse_mode: 'HTML',
           reply_markup: {
             inline_keyboard: [[
-              { text: '✅ Chấp nhận', callback_data: `fr:accept:${fromUid}` },
-              { text: '❌ Từ chối', callback_data: `fr:reject:${fromUid}` },
+              { text: '✅ Chấp nhận', callback_data: `fr:accept:${accountId}:${fromUid}` },
+              { text: '❌ Từ chối', callback_data: `fr:reject:${accountId}:${fromUid}` },
             ]],
           },
         },

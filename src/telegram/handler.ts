@@ -560,8 +560,9 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
 
     try {
       const { syncGroupHistory } = await import('../zalo/historySync.js');
-    // @ts-ignore
-      const api = Array.from(getAllZaloApis().entries())().get(entry.accountId); if (!api) throw new Error('API not found'); const forwarded = await syncGroupHistory(api, entry.accountId, entry.zaloId, topicId, { count, delayMs });
+      const api = resolveApiForTopic(topicId);
+      if (!api) throw new Error('API not found');
+      const forwarded = await syncGroupHistory(api, entry.zaloId, topicId, { count, delayMs });
       await ctx.telegram.sendMessage(
         config.telegram.groupId,
         `✅ Đã đồng bộ <b>${forwarded}</b> tin nhắn lịch sử.`,
@@ -1130,44 +1131,52 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
 
     // Refresh friends cache if stale
     if (!friendsCache.isFresh()) {
-      try {
-        const raw = await currentApi.getAllFriends() as Array<{ userId: string; displayName: string }> | undefined;
-        if (raw) {
-          friendsCache.set(raw.map(f => ({
-            userId:      f.userId,
-            displayName: f.displayName,
-            alias:       aliasCache.get(f.userId),
-avatar: '',
-accountId: 'default',
-          })));
-        }
-      } catch (err) { console.error('[/search] getAllFriends failed:', err); }
+      const allFriends: Array<{ userId: string; displayName: string; avatar: string; accountId: string; alias?: string }> = [];
+      const allApis = getAllZaloApis();
+      for (const [accountId, api] of allApis.entries()) {
+        try {
+          const raw = await api.getAllFriends() as Array<{ userId: string; displayName: string }> | undefined;
+          if (raw) {
+            for (const f of raw) {
+              allFriends.push({
+                userId: f.userId,
+                displayName: f.displayName,
+                alias: aliasCache.get(f.userId),
+                avatar: '',
+                accountId,
+              });
+            }
+          }
+        } catch (err) { console.error(`[/search] getAllFriends failed for ${accountId}:`, err); }
+      }
+      friendsCache.set(allFriends);
     }
 
     // Refresh groups cache if stale
     if (!groupsCache.isFresh()) {
-      try {
-        const rawGroups = await currentApi.getAllGroups() as { gridVerMap?: Record<string, string> } | undefined;
-        const groupIds = Object.keys(rawGroups?.gridVerMap ?? {});
-        if (groupIds.length > 0) {
-          // Fetch info in batches of 50
-          const BATCH = 50;
-          const allGroupInfo: Array<{ groupId: string; name: string; totalMember: number }> = [];
-          for (let i = 0; i < groupIds.length; i += BATCH) {
-            const batch = groupIds.slice(i, i + BATCH);
-            try {
-              const info = await currentApi.getGroupInfo(batch) as {
-                gridInfoMap?: Record<string, { name: string; totalMember: number }>;
-              } | undefined;
-              for (const [gid, g] of Object.entries(info?.gridInfoMap ?? {})) {
-                allGroupInfo.push({ groupId: gid, name: g.name, totalMember: g.totalMember });
-              }
-            } catch { /* skip batch on error */ }
+      const allGroupInfo: Array<{ groupId: string; name: string; totalMember: number; accountId: string; avatar: string }> = [];
+      const allApis = getAllZaloApis();
+      for (const [accountId, api] of allApis.entries()) {
+        try {
+          const rawGroups = await api.getAllGroups() as { gridVerMap?: Record<string, string> } | undefined;
+          const groupIds = Object.keys(rawGroups?.gridVerMap ?? {});
+          if (groupIds.length > 0) {
+            const BATCH = 50;
+            for (let i = 0; i < groupIds.length; i += BATCH) {
+              const batch = groupIds.slice(i, i + BATCH);
+              try {
+                const info = await api.getGroupInfo(batch) as {
+                  gridInfoMap?: Record<string, { name: string; totalMember: number }>;
+                } | undefined;
+                for (const [gid, g] of Object.entries(info?.gridInfoMap ?? {})) {
+                  allGroupInfo.push({ groupId: gid, name: g.name, totalMember: g.totalMember, accountId, avatar: '' });
+                }
+              } catch { /* skip batch on error */ }
+            }
           }
-    // @ts-ignore
-          groupsCache.set(allGroupInfo);
-        }
-      } catch (err) { console.error('[/search] getAllGroups failed:', err); }
+        } catch (err) { console.error(`[/search] getAllGroups failed for ${accountId}:`, err); }
+      }
+      groupsCache.set(allGroupInfo);
     }
 
     const friendResults = friendsCache.search(query, 8);
@@ -1184,19 +1193,21 @@ accountId: 'default',
 
     const buttons: Array<Array<{ text: string; callback_data: string } | { text: string; url: string }>> = [];
     for (const f of friendResults) {
-    // @ts-ignore
-      const existingTopicId = store.getTopicByZalo(f.userId, 0);
+      if (!f.accountId) continue;
+      const existingTopicId = store.getTopicByZalo(f.accountId, f.userId, 0);
       const label = f.displayName?.trim() || `Zalo ${f.userId}`;
+      const alias = accountAliasStore.get(f.accountId) || f.accountId;
       buttons.push([existingTopicId !== undefined
-        ? { text: `👤 ${label} ✅`, callback_data: `sc:${f.userId}` }
-        : { text: `👤 ${label}`, callback_data: `sc:${f.userId}` }]);
+        ? { text: `👤 [${alias}] ${label} ✅`, callback_data: `sc:${f.accountId}:${f.userId}` }
+        : { text: `👤 [${alias}] ${label}`, callback_data: `sc:${f.accountId}:${f.userId}` }]);
     }
     for (const g of groupResults) {
-    // @ts-ignore
-      const existingTopicId = store.getTopicByZalo(g.groupId, 1);
+      if (!g.accountId) continue;
+      const existingTopicId = store.getTopicByZalo(g.accountId, g.groupId, 1);
+      const alias = accountAliasStore.get(g.accountId) || g.accountId;
       buttons.push([existingTopicId !== undefined
-        ? { text: `👥 ${g.name} (${g.totalMember} TV) ✅`, callback_data: `sg:${g.groupId}` }
-        : { text: `👥 ${g.name} (${g.totalMember} TV)`, callback_data: `sg:${g.groupId}` }]);
+        ? { text: `👥 [${alias}] ${g.name} (${g.totalMember} TV) ✅`, callback_data: `sg:${g.accountId}:${g.groupId}` }
+        : { text: `👥 [${alias}] ${g.name} (${g.totalMember} TV)`, callback_data: `sg:${g.accountId}:${g.groupId}` }]);
     }
 
     const parts: string[] = [`🔍 Kết quả "<b>${query}</b>":`, ''];
@@ -1219,40 +1230,42 @@ accountId: 'default',
       : undefined;
     const replyOpts = threadId ? { message_thread_id: threadId } : {};
 
-    if (!currentApi) { await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Zalo chưa kết nối', replyOpts); return; }
+    const allApis = getAllZaloApis();
+    if (allApis.size === 0) {
+      await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Zalo chưa kết nối', replyOpts);
+      return;
+    }
 
     // Refresh groups cache if stale
     if (!groupsCache.isFresh()) {
       await ctx.telegram.sendMessage(config.telegram.groupId, '⏳ Đang tải danh sách nhóm...', replyOpts);
-      try {
-        const rawGroups = await currentApi.getAllGroups() as { gridVerMap?: Record<string, string> } | undefined;
-        const groupIds = Object.keys(rawGroups?.gridVerMap ?? {});
-        const BATCH = 50;
-        const allGroupInfo: Array<{ groupId: string; name: string; totalMember: number }> = [];
-        for (let i = 0; i < groupIds.length; i += BATCH) {
-          const batch = groupIds.slice(i, i + BATCH);
-          try {
-            const info = await currentApi.getGroupInfo(batch) as {
-              gridInfoMap?: Record<string, { name: string; totalMember: number }>;
-            } | undefined;
-            for (const [gid, g] of Object.entries(info?.gridInfoMap ?? {})) {
-              allGroupInfo.push({ groupId: gid, name: g.name, totalMember: g.totalMember });
-            }
-          } catch { /* skip */ }
+      const allGroupInfo: Array<{ groupId: string; name: string; totalMember: number; accountId: string; avatar: string }> = [];
+      for (const [accountId, api] of allApis.entries()) {
+        try {
+          const rawGroups = await api.getAllGroups() as { gridVerMap?: Record<string, string> } | undefined;
+          const groupIds = Object.keys(rawGroups?.gridVerMap ?? {});
+          const BATCH = 50;
+          for (let i = 0; i < groupIds.length; i += BATCH) {
+            const batch = groupIds.slice(i, i + BATCH);
+            try {
+              const info = await api.getGroupInfo(batch) as {
+                gridInfoMap?: Record<string, { name: string; totalMember: number }>;
+              } | undefined;
+              for (const [gid, g] of Object.entries(info?.gridInfoMap ?? {})) {
+                allGroupInfo.push({ groupId: gid, name: g.name, totalMember: g.totalMember, accountId, avatar: '' });
+              }
+            } catch { /* skip */ }
+          }
+        } catch (err) {
+          console.error(`[/addgroup] failed for ${accountId}:`, err);
         }
-    // @ts-ignore
-        groupsCache.set(allGroupInfo);
-      } catch (err) {
-        console.error('[/addgroup] failed:', err);
-        await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Không lấy được danh sách nhóm.', replyOpts);
-        return;
       }
+      groupsCache.set(allGroupInfo);
     }
 
     // Show unmapped groups (no topic yet), sorted by name
     const unmapped = groupsCache.search('', 50)
-    // @ts-ignore
-      .filter(g => store.getTopicByZalo(g.groupId, 1) === undefined)
+      .filter(g => g.accountId && store.getTopicByZalo(g.accountId, g.groupId, 1) === undefined)
       .sort((a, b) => a.name.localeCompare(b.name, 'vi'));
 
     if (unmapped.length === 0) {
@@ -1264,10 +1277,13 @@ accountId: 'default',
       return;
     }
 
-    const buttons = unmapped.slice(0, 30).map(g => ([{
-      text: `👥 ${g.name} (${g.totalMember} TV)`,
-      callback_data: `sg:${g.groupId}`,
-    }]));
+    const buttons = unmapped.slice(0, 30).map(g => {
+      const alias = accountAliasStore.get(g.accountId!) || g.accountId!;
+      return [{
+        text: `👥 [${alias}] ${g.name} (${g.totalMember} TV)`,
+        callback_data: `sg:${g.accountId}:${g.groupId}`,
+      }];
+    });
 
     await ctx.telegram.sendMessage(
       config.telegram.groupId,
@@ -1284,7 +1300,8 @@ accountId: 'default',
       : undefined;
     const replyOpts = threadId ? { message_thread_id: threadId } : {};
 
-    if (!currentApi) {
+    const allApis = getAllZaloApis();
+    if (allApis.size === 0) {
       await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Zalo chưa kết nối', replyOpts);
       return;
     }
@@ -1301,7 +1318,9 @@ accountId: 'default',
     }
 
     try {
-      const user = await currentApi.findUser(phone) as {
+      // Use the first API to find the user globally
+      const firstApi = Array.from(allApis.values())[0];
+      const user = await firstApi.findUser(phone) as {
         uid?: string; display_name?: string; zalo_name?: string; avatar?: string;
         globalId?: string;
       } | undefined;
@@ -1316,27 +1335,32 @@ accountId: 'default',
       }
 
       const name = user.display_name ?? user.zalo_name ?? `UID ${user.uid}`;
-      const status = await currentApi.getFriendRequestStatus(user.uid) as {
-        is_friend?: number; is_requested?: number; is_requesting?: number;
-      } | undefined;
+      const keyboard: Array<[{ text: string; callback_data: string }]> = [];
 
-      let statusLine = '';
-      if (status?.is_friend) statusLine = '✅ Đã là bạn bè';
-      else if (status?.is_requesting) statusLine = '⏳ Đang chờ họ chấp nhận';
-      else if (status?.is_requested) statusLine = '📩 Họ đang chờ bạn chấp nhận';
+      for (const [accountId, api] of allApis.entries()) {
+        const alias = accountAliasStore.get(accountId) || accountId;
+        const status = await api.getFriendRequestStatus(user.uid) as {
+          is_friend?: number; is_requested?: number; is_requesting?: number;
+        } | undefined;
 
-      const keyboard = statusLine ? [] : [[{
-        text: `➕ Kết bạn với ${name}`,
-        callback_data: `af:${user.uid}`,
-      }]];
+        if (status?.is_friend) {
+          keyboard.push([{ text: `✅ [${alias}] Đã là bạn bè`, callback_data: 'noop' }]);
+        } else if (status?.is_requesting) {
+          keyboard.push([{ text: `⏳ [${alias}] Đang chờ họ chấp nhận`, callback_data: 'noop' }]);
+        } else if (status?.is_requested) {
+          keyboard.push([{ text: `📩 [${alias}] Họ chờ bạn chấp nhận`, callback_data: `afr:${accountId}:${user.uid}` }]);
+        } else {
+          keyboard.push([{ text: `➕ [${alias}] Kết bạn với ${name}`, callback_data: `af:${accountId}:${user.uid}` }]);
+        }
+      }
 
       await ctx.telegram.sendMessage(
         config.telegram.groupId,
-        `👤 <b>${name}</b>\n📱 ${phone}${statusLine ? `\n${statusLine}` : ''}`,
+        `👤 <b>${name}</b>\n📱 ${phone}`,
         {
           ...replyOpts,
           parse_mode: 'HTML',
-          ...(keyboard.length ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+          reply_markup: { inline_keyboard: keyboard },
         },
       );
     } catch (err) {
@@ -1347,34 +1371,58 @@ accountId: 'default',
 
   // ── /friendrequests ────────────────────────────────────────────────────────
   async function getFriendRequestsMessage(page: number) {
-    if (!currentApi) throw new Error('Zalo chưa kết nối');
+    const allApis = getAllZaloApis();
+    if (allApis.size === 0) throw new Error('Zalo chưa kết nối');
     
-    // Fetch data
-    let [sentReqs, recvRecommends, groupInvites] = await Promise.all([
-      appGetSentFriendRequests(500),
-      appGetReceivedFriendRequests(500),
-      currentApi.getGroupInviteBoxList({ invPerPage: 100 }) as Promise<any>,
-    ]);
+    const allItems: Array<{ type: 'recv' | 'sent' | 'group', data: any, accountId: string, alias: string }> = [];
 
-    if (!sentReqs || Object.keys(sentReqs).length === 0) {
-      sentReqs = (await currentApi.getSentFriendRequest()) as any;
+    // Attempt to get app-level requests, though they only apply to the active app-session.
+    let appSentReqs: any;
+    let appRecvRecommends: any;
+    try {
+      appSentReqs = await appGetSentFriendRequests(500);
+      appRecvRecommends = await appGetReceivedFriendRequests(500);
+    } catch {}
+
+    let hasUsedAppReqs = false;
+
+    for (const [accountId, api] of allApis.entries()) {
+      const alias = accountAliasStore.get(accountId) || accountId;
+      
+      let sentReqs: any;
+      let recvRecommends: any;
+      let groupInvites: any;
+      
+      try {
+        groupInvites = await api.getGroupInviteBoxList({ invPerPage: 100 }) as Promise<any>;
+        
+        // Use appReqs for the first account only, as it's a singleton session right now.
+        if (!hasUsedAppReqs && appSentReqs && Object.keys(appSentReqs).length > 0) {
+          sentReqs = appSentReqs;
+          recvRecommends = appRecvRecommends;
+          hasUsedAppReqs = true;
+        } else {
+          sentReqs = (await api.getSentFriendRequest()) as any;
+          const webRec = await api.getFriendRecommendations() as any;
+          recvRecommends = webRec?.recommItems || [];
+        }
+      } catch (err) {
+        console.error(`[API] Error fetching friend requests for ${alias}:`, err);
+        continue;
+      }
+
+      const receivedReqs = (recvRecommends ?? [])
+        .filter((item: any) => item.dataInfo?.recommType === 2 || item.recommType === 2)
+        .map((item: any) => item.dataInfo || item);
+      const sentList = Object.values(sentReqs ?? {});
+      const invites = groupInvites?.invitations ?? [];
+
+      allItems.push(
+        ...receivedReqs.map((d: any) => ({ type: 'recv' as const, data: d, accountId, alias })),
+        ...sentList.map((d: any) => ({ type: 'sent' as const, data: d, accountId, alias })),
+        ...invites.map((d: any) => ({ type: 'group' as const, data: d, accountId, alias }))
+      );
     }
-    if (!recvRecommends || recvRecommends.length === 0) {
-      const webRec = await currentApi.getFriendRecommendations() as any;
-      recvRecommends = webRec?.recommItems || [];
-    }
-
-    const receivedReqs = (recvRecommends ?? [])
-      .filter((item: any) => item.dataInfo?.recommType === 2 || item.recommType === 2)
-      .map((item: any) => item.dataInfo || item);
-    const sentList = Object.values(sentReqs ?? {});
-    const invites = groupInvites?.invitations ?? [];
-
-    const allItems: Array<{ type: 'recv' | 'sent' | 'group', data: any }> = [
-      ...receivedReqs.map((d: any) => ({ type: 'recv' as const, data: d })),
-      ...sentList.map((d: any) => ({ type: 'sent' as const, data: d })),
-      ...invites.map((d: any) => ({ type: 'group' as const, data: d })),
-    ];
 
     if (allItems.length === 0) {
       return { text: '✅ Không có lời mời nào đang chờ.', reply_markup: undefined };
@@ -1391,33 +1439,33 @@ accountId: 'default',
     const pagedRecv = pagedItems.filter(i => i.type === 'recv');
     if (pagedRecv.length > 0) {
       parts.push(`📥 <b>Nhận được:</b>`);
-      for (const { data: u } of pagedRecv) {
+      for (const { data: u, accountId, alias } of pagedRecv) {
         const name = escapeHtml(u.displayName || u.zaloName || u.userId);
         const msg  = u.recommInfo?.message ? ` — "${escapeHtml(u.recommInfo.message)}"` : '';
-        parts.push(`• ${name}${msg}`);
-        inlineKeyboards.push([{ text: `✅ Chấp nhận ${u.displayName || u.zaloName}`, callback_data: `afr:${u.userId}` }]);
+        parts.push(`• [${alias}] ${name}${msg}`);
+        inlineKeyboards.push([{ text: `✅ Chấp nhận ${u.displayName || u.zaloName}`, callback_data: `afr:${accountId}:${u.userId}` }]);
       }
     }
 
     const pagedSent = pagedItems.filter(i => i.type === 'sent');
     if (pagedSent.length > 0) {
       parts.push(`\n📤 <b>Đã gửi:</b>`);
-      for (const { data: u } of pagedSent) {
+      for (const { data: u, accountId, alias } of pagedSent) {
         const name = escapeHtml(u.displayName || u.zaloName);
         const msg  = u.fReqInfo?.message ? ` — "${escapeHtml(u.fReqInfo.message)}"` : '';
-        parts.push(`• ${name}${msg}`);
-        inlineKeyboards.push([{ text: `❌ Thu hồi lời mời ${name}`, callback_data: `ufr:${u.userId}` }]);
+        parts.push(`• [${alias}] ${name}${msg}`);
+        inlineKeyboards.push([{ text: `❌ Thu hồi lời mời ${name}`, callback_data: `ufr:${accountId}:${u.userId}` }]);
       }
     }
 
     const pagedGroup = pagedItems.filter(i => i.type === 'group');
     if (pagedGroup.length > 0) {
       parts.push(`\n📬 <b>Nhóm:</b>`);
-      for (const { data: inv } of pagedGroup) {
+      for (const { data: inv, accountId, alias } of pagedGroup) {
         const g = inv.groupInfo;
         const exp = new Date(Number(inv.expiredTs) * 1000).toLocaleDateString('vi-VN');
-        parts.push(`• 👥 <b>${escapeHtml(g.name)}</b> (${g.totalMember} TV)\n  Mời bởi: ${escapeHtml(inv.inviterInfo.dName)} · HH: ${exp}`);
-        inlineKeyboards.push([{ text: `✅ Tham gia ${g.name}`, callback_data: `jgi:${g.groupId}` }]);
+        parts.push(`• 👥 [${alias}] <b>${escapeHtml(g.name)}</b> (${g.totalMember} TV)\n  Mời bởi: ${escapeHtml(inv.inviterInfo.dName)} · HH: ${exp}`);
+        inlineKeyboards.push([{ text: `✅ Tham gia ${g.name}`, callback_data: `jgi:${accountId}:${g.groupId}` }]);
       }
     }
 
@@ -1465,7 +1513,8 @@ accountId: 'default',
       : undefined;
     const replyOpts = threadId ? { message_thread_id: threadId } : {};
 
-    if (!currentApi) {
+    const allApis = getAllZaloApis();
+    if (allApis.size === 0) {
       await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Zalo chưa kết nối', replyOpts);
       return;
     }
@@ -1481,42 +1530,42 @@ accountId: 'default',
       return;
     }
 
-    try {
-      // Thử lấy info link trước (API cần object { link })
-      let groupName: string | undefined;
-      let totalMember: number | undefined;
+    const results: string[] = [];
+    for (const [accountId, api] of allApis.entries()) {
+      const alias = accountAliasStore.get(accountId) || accountId;
       try {
-        const linkInfo = await currentApi.getGroupLinkInfo({ link }) as {
-          name?: string; totalMember?: number;
-        } | undefined;
-        groupName   = linkInfo?.name;
-        totalMember = linkInfo?.totalMember;
-      } catch { /* info fetch failure is non-fatal */ }
+        let groupName: string | undefined;
+        let totalMember: number | undefined;
+        try {
+          const linkInfo = await api.getGroupLinkInfo({ link }) as {
+            name?: string; totalMember?: number;
+          } | undefined;
+          groupName   = linkInfo?.name;
+          totalMember = linkInfo?.totalMember;
+        } catch { /* ignore */ }
 
-      await currentApi.joinGroupLink(link);
-
-      const memberText = totalMember ? ` (${totalMember} TV)` : '';
-      await ctx.telegram.sendMessage(
-        config.telegram.groupId,
-        groupName
-          ? `✅ Đã tham gia nhóm <b>${escapeHtml(groupName)}</b>${memberText}!`
-          : '✅ Đã gửi yêu cầu tham gia nhóm thành công!',
-        { ...replyOpts, parse_mode: 'HTML' },
-      );
-      groupsCache.set([]);
-    } catch (err) {
-      const errCode = (err as { code?: number })?.code;
-      const errMsg  = err instanceof Error ? err.message : String(err);
-      console.error('[/joingroup]', err);
-      // code 178 = already a member, 240 = requires admin approval
-      if (errCode === 178 || errMsg.includes('178')) {
-        await ctx.telegram.sendMessage(config.telegram.groupId, '⚠️ Bạn đã là thành viên nhóm này rồi.', replyOpts);
-      } else if (errCode === 240 || errMsg.toLowerCase().includes('waiting') || errMsg.includes('240')) {
-        await ctx.telegram.sendMessage(config.telegram.groupId, '⏳ Nhóm yêu cầu duyệt thành viên. Yêu cầu tham gia đã được gửi — chờ admin duyệt.', replyOpts);
-      } else {
-        await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Không thể tham gia nhóm. Link có thể đã hết hạn hoặc không hợp lệ.', replyOpts);
+        await api.joinGroupLink(link);
+        const memberText = totalMember ? ` (${totalMember} TV)` : '';
+        results.push(`✅ [${alias}] Đã tham gia <b>${escapeHtml(groupName || 'nhóm')}</b>${memberText}`);
+      } catch (err) {
+        const errCode = (err as { code?: number })?.code;
+        const errMsg  = err instanceof Error ? err.message : String(err);
+        if (errCode === 178 || errMsg.includes('178')) {
+          results.push(`⚠️ [${alias}] Đã là thành viên nhóm này`);
+        } else if (errCode === 240 || errMsg.toLowerCase().includes('waiting') || errMsg.includes('240')) {
+          results.push(`⏳ [${alias}] Đã gửi yêu cầu — chờ duyệt`);
+        } else {
+          results.push(`❌ [${alias}] Lỗi (link hỏng hoặc tài khoản bị chặn)`);
+        }
       }
     }
+    
+    groupsCache.set([]);
+    await ctx.telegram.sendMessage(
+      config.telegram.groupId,
+      results.join('\n'),
+      { ...replyOpts, parse_mode: 'HTML' },
+    );
   });
 
   // ── /leavegroup ─────────────────────────────────────────────────────────────
@@ -1746,12 +1795,17 @@ accountId: 'default',
     if (data?.startsWith('lock_poll:')) {
       const pollId = Number(data.slice('lock_poll:'.length));
       const entry = pollStore.getByPollId(pollId);
-      if (!entry || !currentApi) {
+      if (!entry) {
         await ctx.answerCbQuery('❌ Không tìm thấy bình chọn.');
         return;
       }
+      const api = resolveApiForTopic(entry.tgThreadId);
+      if (!api) {
+        await ctx.answerCbQuery('❌ Không tìm thấy API cho bình chọn này.');
+        return;
+      }
       try {
-        await doLockPoll(entry, currentApi);
+        await doLockPoll(entry, api);
         await ctx.answerCbQuery('✅ Đã khoá bình chọn');
       } catch (err) {
         console.error('[TG→Zalo] lock_poll callback error:', err);
@@ -1799,11 +1853,14 @@ accountId: 'default',
     if (data?.startsWith('fr:')) {
       const parts = data.split(':');
       const action = parts[1]; // 'accept' or 'reject'
-      const fromUid = parts[2];
-      if (!fromUid || !currentApi) { await ctx.answerCbQuery('❌ Zalo chưa kết nối'); return; }
+      const accountId = parts[2];
+      const fromUid = parts[3];
+      const api = getAllZaloApis().get(accountId);
+      
+      if (!fromUid || !api) { await ctx.answerCbQuery('❌ Zalo chưa kết nối'); return; }
       try {
         if (action === 'accept') {
-          await currentApi.acceptFriendRequest(fromUid);
+          await api.acceptFriendRequest(fromUid);
           await ctx.answerCbQuery('✅ Đã chấp nhận kết bạn!');
           await ctx.editMessageReplyMarkup(undefined);
           await ctx.editMessageText(
@@ -1813,7 +1870,7 @@ accountId: 'default',
             { parse_mode: 'HTML' },
           ).catch(() => undefined);
         } else {
-          await currentApi.rejectFriendRequest(fromUid);
+          await api.rejectFriendRequest(fromUid);
           await ctx.answerCbQuery('✅ Đã từ chối');
           await ctx.editMessageReplyMarkup(undefined);
           await ctx.editMessageText(
@@ -1832,10 +1889,14 @@ accountId: 'default',
 
     // ── af: send friend request ──────────────────────────────────────────────
     if (data?.startsWith('af:')) {
-      const userId = data.slice(3);
-      if (!currentApi) { await ctx.answerCbQuery('❌ Zalo chưa kết nối'); return; }
+      const parts = data.split(':');
+      const accountId = parts[1];
+      const userId = parts[2];
+      const api = getAllZaloApis().get(accountId);
+      
+      if (!api) { await ctx.answerCbQuery('❌ Zalo chưa kết nối'); return; }
       try {
-        await currentApi.sendFriendRequest('Xin chào! Mình muốn kết bạn với bạn 😊', userId);
+        await api.sendFriendRequest('Xin chào! Mình muốn kết bạn với bạn 😊', userId);
         await ctx.answerCbQuery('✅ Đã gửi lời mời kết bạn!');
         await ctx.editMessageReplyMarkup(undefined);
       } catch (err) {
@@ -1864,10 +1925,14 @@ accountId: 'default',
 
     // ── afr: accept friend request ────────────────────────────────────────────
     if (data?.startsWith('afr:')) {
-      const userId = data.slice(4);
-      if (!currentApi) { await ctx.answerCbQuery('❌ Zalo chưa kết nối'); return; }
+      const parts = data.split(':');
+      const accountId = parts[1];
+      const userId = parts[2];
+      const api = getAllZaloApis().get(accountId);
+      
+      if (!api) { await ctx.answerCbQuery('❌ Zalo chưa kết nối'); return; }
       try {
-        await currentApi.acceptFriendRequest(userId);
+        await api.acceptFriendRequest(userId);
         await ctx.answerCbQuery('✅ Đã chấp nhận lời mời kết bạn!');
         await ctx.editMessageReplyMarkup(undefined);
       } catch (err) {
@@ -1879,10 +1944,14 @@ accountId: 'default',
 
     // ── ufr: undo friend request ──────────────────────────────────────────────
     if (data?.startsWith('ufr:')) {
-      const userId = data.slice(4);
-      if (!currentApi) { await ctx.answerCbQuery('❌ Zalo chưa kết nối'); return; }
+      const parts = data.split(':');
+      const accountId = parts[1];
+      const userId = parts[2];
+      const api = getAllZaloApis().get(accountId);
+
+      if (!api) { await ctx.answerCbQuery('❌ Zalo chưa kết nối'); return; }
       try {
-        await currentApi.undoFriendRequest(userId);
+        await api.undoFriendRequest(userId);
         await ctx.answerCbQuery('✅ Đã thu hồi lời mời kết bạn!');
       } catch (err) {
         console.error('[cb/ufr]', err);
@@ -1893,13 +1962,16 @@ accountId: 'default',
 
     // ── gm: approve / reject group join request ──────────────────────────────
     if (data?.startsWith('gm:')) {
-      const parts = data.split(':'); // gm:<action>:<groupId>:<uid>
-      const action  = parts[1]; // 'approve' or 'reject'
-      const groupId = parts[2];
-      const uid     = parts[3];
-      if (!uid || !groupId || !currentApi) { await ctx.answerCbQuery('❌ Zalo chưa kết nối'); return; }
+      const parts = data.split(':'); // gm:<action>:<accountId>:<groupId>:<uid>
+      const action    = parts[1]; // 'approve' or 'reject'
+      const accountId = parts[2];
+      const groupId   = parts[3];
+      const uid       = parts[4];
+      const api = getAllZaloApis().get(accountId);
+      
+      if (!uid || !groupId || !api) { await ctx.answerCbQuery('❌ Zalo chưa kết nối'); return; }
       try {
-        await currentApi.reviewPendingMemberRequest(
+        await api.reviewPendingMemberRequest(
           { members: [uid], isApprove: action === 'approve' },
           groupId,
         );
@@ -1922,10 +1994,14 @@ accountId: 'default',
 
     // ── jgi: join group from invite box ─────────────────────────────────────
     if (data?.startsWith('jgi:')) {
-      const groupId = data.slice(4);
-      if (!currentApi) { await ctx.answerCbQuery('❌ Zalo chưa kết nối'); return; }
+      const parts = data.split(':');
+      const accountId = parts[1];
+      const groupId = parts[2];
+      const api = getAllZaloApis().get(accountId);
+
+      if (!api) { await ctx.answerCbQuery('❌ Zalo chưa kết nối'); return; }
       try {
-        await currentApi.joinGroupInviteBox(groupId);
+        await api.joinGroupInviteBox(groupId);
         await ctx.answerCbQuery('✅ Đã tham gia nhóm!');
         await ctx.editMessageReplyMarkup(undefined);
         groupsCache.set([]);
@@ -2052,13 +2128,20 @@ accountId: 'default',
     if (!data?.startsWith('sc:') && !data?.startsWith('sg:')) return;
 
     const isGroup = data.startsWith('sg:');
-    const entityId = data.slice(3);
-    if (!entityId) { await ctx.answerCbQuery('❌ Dữ liệu không hợp lệ'); return; }
+    const parts = data.split(':');
+    if (parts.length < 3) {
+      // Legacy callback without accountId, not supported anymore because we need accountId to create topic
+      await ctx.answerCbQuery('❌ Nút bấm đã cũ, vui lòng dùng lệnh /search lại');
+      return;
+    }
+    const accountId = parts[1];
+    const entityId = parts.slice(2).join(':'); // handle possible colons in entityId, though unlikely
+    
+    if (!entityId || !accountId) { await ctx.answerCbQuery('❌ Dữ liệu không hợp lệ'); return; }
     const threadType: 0 | 1 = isGroup ? 1 : 0;
 
     // Check if topic already exists and is still alive on Telegram
-    // @ts-ignore
-    const existing = store.getTopicByZalo(entityId, threadType);
+    const existing = store.getTopicByZalo(accountId, entityId, threadType);
     if (existing !== undefined) {
       // Verify the topic still exists by sending a test (or use getForumTopicIconStickers as a proxy)
       // Verify the topic is still alive by actually sending a message to it.
@@ -2164,7 +2247,8 @@ accountId: 'default',
       if (displayName) displayNameSource = 'groupsCache';
       if (!displayName) {
         try {
-          const info = await currentApi?.getGroupInfo(entityId) as {
+          const api = getAllZaloApis().get(accountId);
+          const info = await api?.getGroupInfo(entityId) as {
             gridInfoMap?: Record<string, { name: string }>;
           } | undefined;
           displayName = info?.gridInfoMap?.[entityId]?.name;
@@ -2180,16 +2264,17 @@ accountId: 'default',
 
     // Create TG forum topic
     try {
-      const icon = isGroup ? 0x6FB9F0 : 0xFF93B2;
-      const prefix = isGroup ? '👥' : '👤';
+      const alias = accountAliasStore.get(accountId) || accountId;
+      const topicTitle = `[${alias}] ` + topicName(displayName, threadType);
+
       const topic = await ctx.telegram.createForumTopic(
         config.telegram.groupId,
-        `${prefix} ${displayName}`.slice(0, 128),
-        { icon_color: icon },
+        topicTitle.slice(0, 128),
+        { icon_color: isGroup ? 0x6FB9F0 : 0xFF93B2 },
       );
       const topicId = topic.message_thread_id;
-      store.set({ topicId, zaloId: entityId, type: threadType, name: displayName });
-      console.log(`[search/cb] Created ${isGroup ? 'group' : 'DM'} topic "${displayName}" (topicId=${topicId})`);
+      store.set({ topicId, zaloId: entityId, type: threadType, name: topicTitle, accountId });
+      console.log(`[search/cb] Created ${isGroup ? 'group' : 'DM'} topic "${topicTitle}" (topicId=${topicId})`);
 
       await ctx.answerCbQuery('✅ Đã tạo topic!');
       await ctx.telegram.sendMessage(
