@@ -127,6 +127,12 @@ async function startZalo(
   let _reconnectInProgress = false;
   const scheduleReconnect = (delayMs: number): void => {
     if (_reconnectInProgress) return;
+    tgBot.telegram.sendMessage(
+      config.telegram.groupId, 
+      `⚠️ <b>Zalo (${accountName}) mất kết nối!</b>\nĐang tự động kết nối lại sau ${delayMs/1000}s...`, 
+      { parse_mode: 'HTML' }
+    ).catch(() => undefined);
+
     setTimeout(() => {
       void (async () => {
         if (_reconnectInProgress) return;
@@ -137,10 +143,13 @@ async function startZalo(
           const newApi = await initZaloApi(accountId);
           if (newApi) {
             await startZalo(newApi, accountId, accountName, true);
-            tgBot.telegram.sendMessage(config.telegram.groupId, `✅ Zalo (${accountName}) đã kết nối lại.`).catch(() => undefined);
+            tgBot.telegram.sendMessage(config.telegram.groupId, `✅ <b>Zalo (${accountName})</b> đã kết nối lại thành công.`, { parse_mode: 'HTML' }).catch(() => undefined);
+          } else {
+            tgBot.telegram.sendMessage(config.telegram.groupId, `❌ <b>Zalo (${accountName})</b> tự động kết nối lại thất bại. Vui lòng kiểm tra lại.`, { parse_mode: 'HTML' }).catch(() => undefined);
           }
         } catch (err) {
           console.error('[Boot] Zalo reconnect failed:', err);
+          tgBot.telegram.sendMessage(config.telegram.groupId, `❌ Lỗi khi kết nối lại Zalo (${accountName}): ${String(err)}`).catch(() => undefined);
         } finally {
           _reconnectInProgress = false;
         }
