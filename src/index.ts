@@ -127,34 +127,48 @@ async function startZalo(
   let _reconnectInProgress = false;
   const scheduleReconnect = (delayMs: number): void => {
     if (_reconnectInProgress) return;
+    _reconnectInProgress = true;
+    
     tgBot.telegram.sendMessage(
       config.telegram.groupId, 
-      `⚠️ <b>Zalo (${accountName}) mất kết nối!</b>\nĐang tự động kết nối lại sau ${delayMs/1000}s...`, 
+      `⚠️ <b>Zalo (${accountName}) mất kết nối!</b>\nĐang tự động kết nối lại...`, 
       { parse_mode: 'HTML' }
     ).catch(() => undefined);
 
-    setTimeout(() => {
-      void (async () => {
-        if (_reconnectInProgress) return;
-        _reconnectInProgress = true;
-        try {
-          // Instead of clearCredentials which deletes the file, just remove from Map
-          const { initZaloApi } = await import('./zalo/client.js');
-          const newApi = await initZaloApi(accountId);
-          if (newApi) {
-            await startZalo(newApi, accountId, accountName, true);
-            tgBot.telegram.sendMessage(config.telegram.groupId, `✅ <b>Zalo (${accountName})</b> đã kết nối lại thành công.`, { parse_mode: 'HTML' }).catch(() => undefined);
-          } else {
-            tgBot.telegram.sendMessage(config.telegram.groupId, `❌ <b>Zalo (${accountName})</b> tự động kết nối lại thất bại. Vui lòng kiểm tra lại.`, { parse_mode: 'HTML' }).catch(() => undefined);
+    let attempt = 0;
+    const maxDelay = 30_000; // max 30 seconds between retries
+
+    const doReconnect = (waitMs: number) => {
+      setTimeout(() => {
+        void (async () => {
+          attempt++;
+          try {
+            const { initZaloApi } = await import('./zalo/client.js');
+            const newApi = await initZaloApi(accountId);
+            if (newApi) {
+              await startZalo(newApi, accountId, accountName, true);
+              const suffix = attempt > 1 ? ` sau ${attempt} lần thử.` : '.';
+              tgBot.telegram.sendMessage(config.telegram.groupId, `✅ <b>Zalo (${accountName})</b> đã kết nối lại thành công${suffix}`, { parse_mode: 'HTML' }).catch(() => undefined);
+              _reconnectInProgress = false;
+            } else {
+              // Retry on undefined (network error)
+              console.warn(`[Boot] Zalo reconnect failed (attempt ${attempt}). Retrying...`);
+              if (attempt === 1) {
+                tgBot.telegram.sendMessage(config.telegram.groupId, `🔄 <b>Zalo (${accountName})</b> kết nối lại thất bại. Đang thử lại liên tục trong nền...`, { parse_mode: 'HTML' }).catch(() => undefined);
+              }
+              const nextDelay = Math.min(waitMs * 1.5, maxDelay);
+              doReconnect(nextDelay);
+            }
+          } catch (err) {
+            console.error('[Boot] Zalo reconnect failed critically:', err);
+            tgBot.telegram.sendMessage(config.telegram.groupId, `❌ Lỗi khi kết nối lại Zalo (${accountName}): ${String(err)}`).catch(() => undefined);
+            _reconnectInProgress = false;
           }
-        } catch (err) {
-          console.error('[Boot] Zalo reconnect failed:', err);
-          tgBot.telegram.sendMessage(config.telegram.groupId, `❌ Lỗi khi kết nối lại Zalo (${accountName}): ${String(err)}`).catch(() => undefined);
-        } finally {
-          _reconnectInProgress = false;
-        }
-      })();
-    }, delayMs);
+        })();
+      }, waitMs);
+    };
+
+    doReconnect(delayMs);
   };
 
   api.listener.once('disconnected', (code: CloseReason, reason: string) => {
@@ -175,6 +189,66 @@ async function main(): Promise<void> {
 
   startUpdateChecker(tgBot);
 
+  tgBot.command('reconnect', async (ctx) => {
+    if (ctx.chat.id !== config.telegram.groupId && ctx.chat.type !== 'private') return;
+    
+    const text = ctx.message.text || '';
+    const parts = text.split(/\s+/).slice(1);
+    const targetIds = parts.filter(p => p.length > 0);
+
+    if (targetIds.length === 0) {
+      await ctx.reply('🔄 Đang ngắt kết nối cũ và kết nối lại tất cả Zalo...');
+      try {
+        // Dừng các listener cũ trước khi khởi tạo lại để tránh trùng lặp
+        for (const api of getAllZaloApis().values()) {
+          try { api.listener.stop(); } catch (e) {}
+        }
+  
+        const {apis} = await initAllZaloApis();
+        for (const [accountId, api] of apis) {
+      // @ts-ignore
+           await startZalo(api, accountId, accountAliasStore.get(accountId) || 'Zalo', true);
+        }
+        await ctx.reply('✅ Đã kết nối lại tất cả Zalo thành công!');
+      } catch (err) {
+        console.error('[/reconnect] Failed:', err);
+        await ctx.reply(`❌ Lỗi khi kết nối lại: ${String(err)}`).catch(() => undefined);
+      }
+    } else {
+      await ctx.reply(`🔄 Đang kết nối lại ${targetIds.length} tài khoản Zalo...`);
+      const { initZaloApi } = await import('./zalo/client.js');
+      const allApis = getAllZaloApis();
+      const successIds: string[] = [];
+      const failedIds: string[] = [];
+
+      for (const accountId of targetIds) {
+         // Dừng listener cũ nếu đang chạy
+         const oldApi = allApis.get(accountId);
+         if (oldApi) {
+           try { oldApi.listener.stop(); } catch (e) {}
+         }
+         
+         try {
+           const newApi = await initZaloApi(accountId);
+           if (newApi) {
+             // @ts-ignore
+             await startZalo(newApi, accountId, accountAliasStore.get(accountId) || accountId, true);
+             successIds.push(accountId);
+           } else {
+             failedIds.push(accountId);
+           }
+         } catch (e) {
+           failedIds.push(accountId);
+         }
+      }
+
+      let msg = '';
+      if (successIds.length > 0) msg += `✅ Thành công: ${successIds.join(', ')}\n`;
+      if (failedIds.length > 0) msg += `❌ Thất bại: ${failedIds.join(', ')}`;
+      await ctx.reply(msg.trim() || 'Không có tài khoản nào được kết nối.');
+    }
+  });
+
   // setupTelegramHandler returns a setter to inject the Zalo API after auto-login.
     // @ts-ignore
   const setZaloApi = setupTelegramHandler(null, async (newApi, accountId, accountName) => {
@@ -183,21 +257,6 @@ async function main(): Promise<void> {
   _setZaloApi = setZaloApi;
 
   syncTelegramCommands().catch(() => undefined);
-
-  tgBot.command('reconnect', async (ctx) => {
-    if (ctx.chat.id !== config.telegram.groupId && ctx.chat.type !== 'private') return;
-    await ctx.reply('🔄 Đang thử kết nối lại các Zalo bằng session cũ...');
-    try {
-      const {apis} = await initAllZaloApis();
-      for (const [accountId, api] of apis) {
-    // @ts-ignore
-         await startZalo(api, accountId, accountAliasStore.get(accountId) || 'Zalo', true);
-      }
-      await ctx.reply('✅ Đã kết nối lại Zalo thành công!');
-    } catch (err) {
-      console.error('[/reconnect] Failed:', err);
-    }
-  });
 
   tgBot.launch({ allowedUpdates: ['message', 'callback_query', 'message_reaction', 'poll_answer', 'poll'] }, () => {
     console.log('[Boot] Telegram bot started ✓');

@@ -1637,6 +1637,24 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
     const groupCount = all.filter(e => e.type === 1).length;
     const dmCount    = all.length - groupCount;
 
+    const accountTopics = new Map<string, { group: number; dm: number }>();
+    for (const e of all) {
+      const aid = e.accountId || 'legacy';
+      if (!accountTopics.has(aid)) accountTopics.set(aid, { group: 0, dm: 0 });
+      if (e.type === 1) accountTopics.get(aid)!.group++;
+      else accountTopics.get(aid)!.dm++;
+    }
+
+    let topicBreakdown = '';
+    if (accountTopics.size > 0) {
+      const parts: string[] = [];
+      for (const [aid, counts] of accountTopics.entries()) {
+         const alias = aid === 'legacy' ? 'Chưa gán account' : accountAliasStore.get(aid) || aid;
+         parts.push(`  ├ <i>${escapeHtml(alias)}</i>: ${counts.group + counts.dm} (${counts.group} nhóm, ${counts.dm} DM)`);
+      }
+      topicBreakdown = '\n' + parts.join('\n');
+    }
+
     // Multi-account: show all connected accounts
     const allApis = getAllZaloApis();
     let accountLines = '';
@@ -1650,10 +1668,10 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
             profile?: { displayName?: string; zaloName?: string };
           };
           const name = info?.profile?.displayName ?? info?.profile?.zaloName ?? accountId;
-          lines.push(`  🟢 <b>${escapeHtml(name)}</b>`);
+          lines.push(`  🟢 <b>${escapeHtml(name)}</b> (ID: <code>${accountId}</code>)`);
         } catch {
           const alias = accountAliasStore.get(accountId) || accountId;
-          lines.push(`  🟡 <b>${escapeHtml(alias)}</b> (kết nối, không lấy được thông tin)`);
+          lines.push(`  🟡 <b>${escapeHtml(alias)}</b> (ID: <code>${accountId}</code>, không lấy được info)`);
         }
       }
       accountLines = `\n👥 Zalo (${allApis.size}):\n${lines.join('\n')}`;
@@ -1670,7 +1688,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       config.telegram.groupId,
       `📊 <b>Trạng thái Bridge</b>${accountLines}\n` +
       `⏱ Uptime: <code>${uptimeStr}</code>\n` +
-      `📌 Topics: <b>${all.length}</b> (${groupCount} nhóm, ${dmCount} DM)` +
+      `📌 Topics: <b>${all.length}</b> (${groupCount} nhóm, ${dmCount} DM)${topicBreakdown}` +
       localApiSection,
       { parse_mode: 'HTML' },
     );
