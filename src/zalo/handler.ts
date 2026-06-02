@@ -612,7 +612,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
       username?: string;
     }>;
     if (Array.isArray(friends) && friends.length) {
-    // @ts-ignore
+      // @ts-ignore
       friendsCache.set(friends.map(f => ({
         userId: f.userId,
         // zca-js User.displayName is the logged-in account's address-book label.
@@ -1973,8 +1973,15 @@ ${escapeHtml(photoCaption)}`
       const topicId = store.getTopicByZalo(accountId, groupId, 1 /* Group */);
       if (topicId === undefined) return;
 
-      const members: Array<{ dName?: string }> = data?.updateMembers ?? [];
-      const names = members.map(m => m.dName ?? '?').join(', ');
+      const members: Array<{ id?: string, uid?: string, dName?: string }> = data?.updateMembers ?? [];
+      const resolvedNames = await Promise.all(members.map(async m => {
+        const dName = m.dName?.trim();
+        if (dName) return dName;
+        const uid = m.id || m.uid;
+        if (uid) return await resolveUserDisplayName(api, uid, '?');
+        return '?';
+      }));
+      const names = resolvedNames.join(', ');
       const actor = data?.creatorId === data?.sourceId ? '' : '';  // unused for now
       void actor;
 
