@@ -16,10 +16,10 @@ function gitExec(cmd: string): string {
 
 function getNewCommit(): string | null {
   try {
-    gitExec('git fetch origin main --quiet');
-    const behind = gitExec('git log HEAD..origin/main --oneline');
+    gitExec('git fetch https://github.com/vonguyendang/zalo-tg multi-zalo --quiet');
+    const behind = gitExec('git log HEAD..FETCH_HEAD --oneline');
     if (!behind) return null;
-    return gitExec('git rev-parse --short origin/main');
+    return gitExec('git rev-parse --short FETCH_HEAD');
   } catch {
     return null;
   }
@@ -27,7 +27,7 @@ function getNewCommit(): string | null {
 
 function getChangelog(): string {
   try {
-    return gitExec('git log HEAD..origin/main --oneline --no-merges');
+    return gitExec('git log HEAD..FETCH_HEAD --oneline --no-merges');
   } catch {
     return '';
   }
@@ -57,7 +57,7 @@ export function startUpdateChecker(bot: Telegraf): void {
       ).catch(() => undefined);
 
       // 1. git pull (--autostash handles unstaged changes when pull.rebase=true)
-      execSync('git pull --autostash origin main', { cwd: PROJECT_ROOT, stdio: 'pipe', timeout: 120_000 });
+      execSync('git pull --autostash https://github.com/vonguyendang/zalo-tg multi-zalo', { cwd: PROJECT_ROOT, stdio: 'pipe', timeout: 120_000 });
 
       await ctx.editMessageText(
         '⏳ <b>Đang cập nhật...</b>\n\n✅ git pull\nnpm install...',
