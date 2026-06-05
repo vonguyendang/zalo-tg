@@ -204,7 +204,7 @@ restart_bot() {
   launchctl kickstart -k "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
   send_tg_notification "⏳ <b>Zalo Bridge đang khởi động lại...</b>
 
-🔄 Đang tải code mới nhất và kết nối lại các tài khoản Zalo.
+🔄 Đang khởi tạo ứng dụng và chuẩn bị kết nối lại các tài khoản Zalo.
 ⏱ Vui lòng đợi khoảng <b>15–30 giây</b> để bot sẵn sàng.
 
 <i>Bạn sẽ nhận được thông báo xác nhận khi bot hoạt động trở lại.</i>"

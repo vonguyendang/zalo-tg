@@ -81,45 +81,50 @@ async function startZalo(
   if (!isReconnect) void pruneLeftGroupTopics(api, accountId);
   await setupZaloHandler(api, accountId, accountName);
 
-  if (isReconnect) {
-    api.listener.once('connected', () => {
-      try {
-        api.listener.requestOldMessages(ThreadType.User);
-        api.listener.requestOldMessages(ThreadType.Group);
-        api.listener.requestOldReactions(ThreadType.User);
-        api.listener.requestOldReactions(ThreadType.Group);
-        console.log(`[Boot] Requested catch-up sync after reconnect for ${accountName}`);
+  api.listener.once('connected', () => {
+    try {
+      api.listener.requestOldMessages(ThreadType.User);
+      api.listener.requestOldMessages(ThreadType.Group);
+      api.listener.requestOldReactions(ThreadType.User);
+      api.listener.requestOldReactions(ThreadType.Group);
+      console.log(`[Boot] Requested catch-up sync for ${accountName} (isReconnect=${isReconnect})`);
 
-        void (async () => {
-          const groups = store.all().filter(e => e.type === 1 && e.accountId === accountId);
-          if (groups.length === 0) return;
-          
-          let totalSynced = 0;
-          for (const g of groups) {
-            try {
-              const n = await syncGroupHistory(api, g.zaloId, g.topicId, accountId, { 
-                count: 30, 
-                delayMs: config.zalo.historySyncDelayMs || 2000 
-              });
-              totalSynced += n;
-              await new Promise(r => setTimeout(r, 3000));
-            } catch (err) {
-              console.warn(`[Boot] Lỗi đồng bộ tin lỡ cho nhóm ${g.zaloId}:`, err);
-            }
+      void (async () => {
+        const groups = store.all().filter(e => e.type === 1 && e.accountId === accountId);
+        if (groups.length === 0) return;
+        
+        tgBot.telegram.sendMessage(
+          config.telegram.groupId, 
+          `🔄 <b>Zalo (${accountName}) đang tự động đồng bộ lịch sử tin nhắn lỡ...</b>\nQuá trình này đang chạy ngầm và có thể mất vài phút.`,
+          { parse_mode: 'HTML' }
+        ).catch(() => undefined);
+
+        let totalSynced = 0;
+        for (const g of groups) {
+          try {
+            const n = await syncGroupHistory(api, g.zaloId, g.topicId, accountId, { 
+              count: 30, 
+              delayMs: config.zalo.historySyncDelayMs || 2000 
+            });
+            totalSynced += n;
+            await new Promise(r => setTimeout(r, 3000));
+          } catch (err) {
+            console.warn(`[Boot] Lỗi đồng bộ tin lỡ cho nhóm ${g.zaloId}:`, err);
           }
-          if (totalSynced > 0) {
-            tgBot.telegram.sendMessage(
-              config.telegram.groupId, 
-              `🔄 <b>Zalo (${accountName}) đã kết nối lại.</b>\nĐã đồng bộ thành công ${totalSynced} tin nhắn.`,
-              { parse_mode: 'HTML' }
-            ).catch(() => undefined);
-          }
-        })();
-      } catch (err) {
-        console.warn('[Boot] Failed to request catch-up sync:', err);
-      }
-    });
-  }
+        }
+        if (totalSynced > 0) {
+          const actionText = isReconnect ? 'kết nối lại' : 'khởi động';
+          tgBot.telegram.sendMessage(
+            config.telegram.groupId, 
+            `🔄 <b>Zalo (${accountName}) đã ${actionText}.</b>\nĐã tự động đồng bộ ${totalSynced} tin nhắn lỡ.`,
+            { parse_mode: 'HTML' }
+          ).catch(() => undefined);
+        }
+      })();
+    } catch (err) {
+      console.warn('[Boot] Failed to request catch-up sync:', err);
+    }
+  });
   
   api.listener.start();
   console.log(`[Boot] Zalo listener ${isReconnect ? 're' : ''}started for ${accountName} ✓`);
