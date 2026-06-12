@@ -7,7 +7,12 @@ APP_DIR="$HOME/.zalo-bot-control"
 RUN_SCRIPT="$APP_DIR/zalo-bot-run.sh"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/zalo-bot-control"
-PROJECT_DIR="/Volumes/MacintoshHD-Data/DATA/code/zalo-tg"
+if [[ -L "${BASH_SOURCE[0]}" ]]; then
+  SCRIPT_DIR="$(dirname "$(readlink "${BASH_SOURCE[0]}")")"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 SETTINGS_FILE="$APP_DIR/settings.conf"
 
 mkdir -p "$APP_DIR" "$HOME/Library/LaunchAgents" "$LOG_DIR"
@@ -27,10 +32,12 @@ save_settings() {
   cat > "$SETTINGS_FILE" <<EOF
 LOG_RETENTION_DAYS=$LOG_RETENTION_DAYS
 BOT_BRANCH="$BOT_BRANCH"
+PROJECT_DIR="$PROJECT_DIR"
 EOF
 }
 
 load_settings
+save_settings
 
 send_tg_notification() {
   local raw_message="$1"
@@ -81,7 +88,7 @@ set -euo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:\$PATH"
 
-PROJECT_DIR="/Volumes/MacintoshHD-Data/DATA/code/zalo-tg"
+PROJECT_DIR="$PROJECT_DIR"
 LOG_DIR="\$HOME/Library/Logs/zalo-bot-control"
 SETTINGS_FILE="\$HOME/.zalo-bot-control/settings.conf"
 

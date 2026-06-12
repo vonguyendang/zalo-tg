@@ -47,7 +47,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func startBot() {
         let task = Process()
         task.launchPath = "/bin/bash"
-        task.arguments = ["-c", "/Volumes/MacintoshHD-Data/DATA/code/zalo-tg/quick-start-script/zalo-bot-control.sh start_bot_silent"]
+        task.arguments = ["-c", "/Users/dangvo/Projects/zalo-tg/quick-start-script/zalo-bot-control.sh start_bot_silent"]
         try? task.run()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.updateStatus() }
     }
@@ -55,7 +55,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func stopBot() {
         let task = Process()
         task.launchPath = "/bin/bash"
-        task.arguments = ["-c", "/Volumes/MacintoshHD-Data/DATA/code/zalo-tg/quick-start-script/zalo-bot-control.sh stop_bot_silent"]
+        task.arguments = ["-c", "/Users/dangvo/Projects/zalo-tg/quick-start-script/zalo-bot-control.sh stop_bot_silent"]
         try? task.run()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.updateStatus() }
     }
@@ -63,7 +63,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func restartBot() {
         let task = Process()
         task.launchPath = "/bin/bash"
-        task.arguments = ["-c", "/Volumes/MacintoshHD-Data/DATA/code/zalo-tg/quick-start-script/zalo-bot-control.sh restart_bot_silent"]
+        task.arguments = ["-c", "/Users/dangvo/Projects/zalo-tg/quick-start-script/zalo-bot-control.sh restart_bot_silent"]
         try? task.run()
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { self.updateStatus() }
     }

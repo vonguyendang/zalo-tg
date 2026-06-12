@@ -1,7 +1,7 @@
 import Foundation
 let task = Process()
 task.launchPath = "/bin/bash"
-let scriptPath = "/Volumes/MacintoshHD-Data/DATA/code/zalo-tg/quick-start-script/zalo-bot-control.sh"
+let scriptPath = "/Users/dangvo/Projects/zalo-tg/quick-start-script/zalo-bot-control.sh"
 let args = "show_status"
 task.arguments = ["-c", "\"\\(scriptPath)\" \\(args)"]
 do {

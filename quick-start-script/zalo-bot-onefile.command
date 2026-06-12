@@ -6,7 +6,17 @@ APP_DIR="$HOME/.zalo-bot-control"
 RUN_SCRIPT="$APP_DIR/zalo-bot-run.sh"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/zalo-bot-control"
-PROJECT_DIR="/Volumes/MacintoshHD-Data/DATA/code/zalo-tg"
+if [[ -L "${BASH_SOURCE[0]}" ]]; then
+  SCRIPT_DIR="$(dirname "$(readlink "${BASH_SOURCE[0]}")")"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+if [[ "$SCRIPT_DIR" == *"/quick-start-script"* ]]; then
+  PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+else
+  PROJECT_DIR=""
+fi
 SETTINGS_FILE="$APP_DIR/settings.conf"
 
 mkdir -p "$APP_DIR" "$HOME/Library/LaunchAgents" "$LOG_DIR"
@@ -26,10 +36,16 @@ save_settings() {
   cat > "$SETTINGS_FILE" <<EOF
 LOG_RETENTION_DAYS=$LOG_RETENTION_DAYS
 BOT_BRANCH="$BOT_BRANCH"
+PROJECT_DIR="$PROJECT_DIR"
 EOF
 }
 
 load_settings
+
+if [[ -z "${PROJECT_DIR:-}" || ! -d "${PROJECT_DIR:-}" ]]; then
+  osascript -e 'display dialog "Không tìm thấy thư mục dự án. Vui lòng chạy file zalo-bot-control.sh trong thư mục mã nguồn 1 lần để hệ thống ghi nhận đường dẫn mới." buttons {"OK"} default button "OK" with title "Lỗi"'
+  exit 1
+fi
 
 # ── Tự xóa log cũ ──────────────────────────────────────────────────────────────
 
@@ -50,7 +66,7 @@ cat > "$RUN_SCRIPT" <<RUNEOF
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR="/Volumes/MacintoshHD-Data/DATA/code/zalo-tg"
+PROJECT_DIR="$PROJECT_DIR"
 LOG_DIR="\$HOME/Library/Logs/zalo-bot-control"
 SETTINGS_FILE="\$HOME/.zalo-bot-control/settings.conf"
 

@@ -7,7 +7,7 @@ code = code.replace(
 `    func runControlScript(action: String, silent: Bool = false) {
         let task = Process()
         task.launchPath = "/bin/bash"
-        var scriptPath = "/Volumes/MacintoshHD-Data/DATA/code/zalo-tg/quick-start-script/zalo-bot-control.sh"
+        var scriptPath = "/Users/dangvo/Projects/zalo-tg/quick-start-script/zalo-bot-control.sh"
         
         let args = silent ? "\(action)_silent" : action
         task.arguments = ["-c", "\\"\\(scriptPath)\\" \\(args)"]
@@ -17,7 +17,7 @@ code = code.replace(
         DispatchQueue.global(qos: .background).async {
             let task = Process()
             task.launchPath = "/bin/bash"
-            let scriptPath = "/Volumes/MacintoshHD-Data/DATA/code/zalo-tg/quick-start-script/zalo-bot-control.sh"
+            let scriptPath = "/Users/dangvo/Projects/zalo-tg/quick-start-script/zalo-bot-control.sh"
             
             let args = silent ? "\\(action)_silent" : action
             task.arguments = ["-c", "\\"\\(scriptPath)\\" \\(args)"]
@@ -32,11 +32,11 @@ code = code.replace(
 `    @objc func showStatus() {
         let task = Process()
         task.launchPath = "/usr/bin/osascript"
-        task.arguments = ["-e", "tell application \\"Terminal\\" to do script \\"/Volumes/MacintoshHD-Data/DATA/code/zalo-tg/quick-start-script/zalo-bot-control.sh show_status\\""]
+        task.arguments = ["-e", "tell application \\"Terminal\\" to do script \\"/Users/dangvo/Projects/zalo-tg/quick-start-script/zalo-bot-control.sh show_status\\""]
         // We'll just run it directly so it pops up its own dialog.
         let directTask = Process()
         directTask.launchPath = "/bin/bash"
-        directTask.arguments = ["-c", "\\"\\/Volumes/MacintoshHD-Data/DATA/code/zalo-tg/quick-start-script/zalo-bot-control.sh\\" show_status"]
+        directTask.arguments = ["-c", "\\"\\/Users/dangvo/Projects/zalo-tg/quick-start-script/zalo-bot-control.sh\\" show_status"]
         try? directTask.run()
     }`,
 `    @objc func showStatus() {

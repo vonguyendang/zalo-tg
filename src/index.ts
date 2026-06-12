@@ -126,8 +126,16 @@ async function startZalo(
     }
   });
   
-  api.listener.start();
-  console.log(`[Boot] Zalo listener ${isReconnect ? 're' : ''}started for ${accountName} ✓`);
+  try {
+    api.listener.start();
+    console.log(`[Boot] Zalo listener ${isReconnect ? 're' : ''}started for ${accountName} ✓`);
+  } catch (err) {
+    if (String(err).includes('Already started')) {
+      console.warn(`[Boot] Zalo listener cho ${accountName} đã được bật từ trước.`);
+    } else {
+      throw err;
+    }
+  }
 
   let _reconnectInProgress = false;
   const scheduleReconnect = (delayMs: number): void => {

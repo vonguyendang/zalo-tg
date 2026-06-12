@@ -7,6 +7,25 @@ APP_BUNDLE="$APP_DIR/ZaloBotMenu.app"
 BIN_PATH="$APP_BUNDLE/Contents/MacOS/ZaloBotMenu"
 PLIST_PATH="$HOME/Library/LaunchAgents/com.edwardfranklin.zalobotmenu.plist"
 
+echo "Đang cập nhật lại đường dẫn dự án vào cấu hình..."
+PROJECT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
+SETTINGS_FILE="$APP_DIR/settings.conf"
+if [[ -f "$SETTINGS_FILE" ]]; then
+  # Nếu file tồn tại nhưng chưa có PROJECT_DIR hoặc có rồi thì ta thay thế
+  if grep -q "^PROJECT_DIR=" "$SETTINGS_FILE"; then
+    sed -i '' "s|^PROJECT_DIR=.*|PROJECT_DIR=\"$PROJECT_DIR\"|" "$SETTINGS_FILE"
+  else
+    echo "PROJECT_DIR=\"$PROJECT_DIR\"" >> "$SETTINGS_FILE"
+  fi
+else
+  # Nếu chưa có file settings.conf
+  cat > "$SETTINGS_FILE" <<EOF
+LOG_RETENTION_DAYS=7
+BOT_BRANCH="multi-zalo"
+PROJECT_DIR="$PROJECT_DIR"
+EOF
+fi
+
 echo "Đang biên dịch ứng dụng Status Bar..."
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 swiftc "$SCRIPT_DIR/ZaloBotMenu.swift" -o "$BIN_PATH"

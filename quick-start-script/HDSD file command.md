@@ -21,7 +21,7 @@ File `.command` là cách khởi chạy bot **một chạm** trên macOS — dou
 ### Bước 1 — Sao chép file vào Applications
 
 ```bash
-cp /Volumes/MacintoshHD-Data/DATA/code/zalo-tg/quick-start-script/zalo-bot-onefile.command \
+cp /Users/dangvo/Projects/zalo-tg/quick-start-script/zalo-bot-onefile.command \
    /Applications/zalo-bot-onefile.command
 ```
 
@@ -40,6 +40,13 @@ chmod +x /Applications/zalo-bot-onefile.command
 3. Bấm **Open** trong hộp thoại cảnh báo Gatekeeper.
 
 > Chỉ cần làm bước này **một lần**. Những lần sau double-click bình thường.
+
+### Bước 4 — Cập nhật đường dẫn khi bị chuyển vị trí
+Nếu bạn có chuyển toàn bộ thư mục dự án `zalo-tg` đi nơi khác, ứng dụng sẽ báo lỗi do không thể tìm ra đường dẫn mới.
+Bạn cần cập nhật lại đường dẫn vào cấu hình bằng cách:
+1. Vào thư mục mới của `zalo-tg`, mở `quick-start-script`
+2. Nhấp đúp vào file `zalo-bot-control.sh` để chạy nó ít nhất 1 lần (hoặc chạy bằng Terminal).
+3. File này sẽ tự động tìm thấy thư mục hiện tại của nó và lưu vào cấu hình `~/.zalo-bot-control/settings.conf`. Sau đó bạn có thể quay lại chạy file `.command` ở `Applications` như bình thường!
 
 ---
 

@@ -84,10 +84,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func getProjectDir() -> String? {
+        let settingsPath = NSHomeDirectory() + "/.zalo-bot-control/settings.conf"
+        guard let content = try? String(contentsOfFile: settingsPath, encoding: .utf8) else { return nil }
+        for line in content.components(separatedBy: .newlines) {
+            if line.hasPrefix("PROJECT_DIR=") {
+                return line.replacingOccurrences(of: "PROJECT_DIR=", with: "").trimmingCharacters(in: CharacterSet(charactersIn: "\"\'"))
+            }
+        }
+        return nil
+    }
+
     func runControlScript(action: String, silent: Bool = false) {
         DispatchQueue.global(qos: .background).async {
+            guard let projectDir = self.getProjectDir() else {
+                DispatchQueue.main.async {
+                    let alert = NSAlert()
+                    alert.messageText = "Lỗi cấu hình"
+                    alert.informativeText = "Không tìm thấy thư mục dự án. Vui lòng mở Terminal và chạy file zalo-bot-control.sh hoặc nhấp đúp vào file đó một lần để hệ thống tự động ghi nhận đường dẫn."
+                    alert.alertStyle = .critical
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                }
+                return
+            }
             let task = Process()
-            let scriptPath = "/Volumes/MacintoshHD-Data/DATA/code/zalo-tg/quick-start-script/zalo-bot-control.sh"
+            let scriptPath = projectDir + "/quick-start-script/zalo-bot-control.sh"
             task.launchPath = "/bin/bash"
             
             let arg = silent ? "\(action)_silent" : action

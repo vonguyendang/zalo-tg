@@ -224,6 +224,9 @@ export async function initZaloApi(accountId: string): Promise<ZaloAPI | undefine
   const credPath = path.join(config.zalo.credentialsDir, `credentials_${accountId}.json`);
   if (!existsSync(credPath)) return undefined;
 
+  // Dọn dẹp API cũ khỏi bộ nhớ trước khi khởi tạo lại để tránh rác và lỗi Already started
+  _apis.delete(accountId);
+
   try {
     const credentials = JSON.parse(readFileSync(credPath, 'utf8'));
     
