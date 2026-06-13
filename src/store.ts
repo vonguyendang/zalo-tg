@@ -28,6 +28,7 @@ interface StoreData {
   topics: Record<string, TopicEntry>;
   zaloIndex: Record<string, number>;
   accountAliases?: Record<string, string>;
+  whitelistedBots?: number[];
 }
 
 // ── Internal ──────────────────────────────────────────────────────────────────
@@ -74,6 +75,33 @@ export const store = {
     _data.topics[String(entry.topicId)] = entry;
     _data.zaloIndex[zaloKey(entry.accountId, entry.zaloId, entry.type)] = entry.topicId;
     persist(_data);
+  },
+
+  isWhitelistedBot(botId: number): boolean {
+    return _data.whitelistedBots?.includes(botId) ?? false;
+  },
+
+  addWhitelistedBot(botId: number): boolean {
+    if (!_data.whitelistedBots) _data.whitelistedBots = [];
+    if (_data.whitelistedBots.includes(botId)) return false;
+    _data.whitelistedBots.push(botId);
+    persist(_data);
+    return true;
+  },
+
+  removeWhitelistedBot(botId: number): boolean {
+    if (!_data.whitelistedBots) return false;
+    const initialLength = _data.whitelistedBots.length;
+    _data.whitelistedBots = _data.whitelistedBots.filter((id) => id !== botId);
+    if (_data.whitelistedBots.length !== initialLength) {
+      persist(_data);
+      return true;
+    }
+    return false;
+  },
+
+  getWhitelistedBots(): number[] {
+    return _data.whitelistedBots || [];
   },
 
   /** Update the stored display name for an existing topic mapping. */

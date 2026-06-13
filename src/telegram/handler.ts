@@ -38,7 +38,7 @@ const execFileAsync = promisify(execFile);
 
 import type { ZaloAPI } from '../zalo/types.js';
 import { store, msgStore, userCache, friendsCache, groupsCache, sentMsgStore, pollStore, mediaGroupStore, reactionEchoStore, reactionSummaryStore, reactionEventDedupeStore, aliasCache, markRecalled, accountAliasStore, type ZaloQuoteData } from '../store.js';
-import { tgBot } from './bot.js';
+import { tgBot, BOT_COMMANDS, COMMAND_DETAILS } from './bot.js';
 import { config } from '../config.js';
 import { downloadToTemp, cleanTemp, convertToM4a, extractVideoThumbnail, convertWebmToGif } from '../utils/media.js';
 import { triggerQRLogin, getAllZaloApis } from '../zalo/client.js';
@@ -1712,6 +1712,66 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
     inline_keyboard: [[{ text: '◀️ Quay lại', callback_data: 'admin:menu' }]],
   });
 
+  tgBot.command('help', async (ctx) => {
+    if (ctx.chat.id !== config.telegram.groupId) return;
+    const args = ctx.message.text.split(/\s+/).slice(1);
+    
+    if (args.length > 0) {
+      const cmdStr = args[0]!.replace('/', '').toLowerCase();
+      const details = COMMAND_DETAILS[cmdStr];
+      if (details) {
+        await ctx.reply(`📚 <b>Hướng dẫn lệnh /${cmdStr}:</b>\n\n${details}`, { parse_mode: 'HTML' });
+      } else {
+        await ctx.reply(`❌ Không tìm thấy hướng dẫn chi tiết cho lệnh <code>/${cmdStr}</code>.\nGõ <code>/help</code> để xem toàn bộ lệnh.`, { parse_mode: 'HTML' });
+      }
+      return;
+    }
+
+    const lines = BOT_COMMANDS.map(cmd => `/${cmd.command} - ${cmd.description}`);
+    await ctx.reply(`📚 <b>Danh sách các lệnh hiện có:</b>\n\n${lines.join('\n')}\n\n💡 <i>Mẹo: Để xem hướng dẫn chi tiết và ví dụ của một lệnh cụ thể, hãy gõ <code>/help &lt;tên_lệnh&gt;</code> (VD: <code>/help search</code>)</i>`, { parse_mode: 'HTML' });
+  });
+
+  tgBot.command('whitelistbot', async (ctx) => {
+    if (ctx.chat.id !== config.telegram.groupId) return;
+    const text = ctx.message.text ?? '';
+    const parts = text.split(/\s+/);
+    const cmd = parts[1];
+    const targetId = Number(parts[2]);
+
+    if (!cmd || cmd === 'list') {
+      const bots = store.getWhitelistedBots();
+      if (bots.length === 0) {
+        await ctx.reply('🤖 Whitelist Bot đang trống.');
+        return;
+      }
+      await ctx.reply(`🤖 <b>Danh sách Whitelist Bot:</b>\n` + bots.map(id => `- <code>${id}</code>`).join('\n'), { parse_mode: 'HTML' });
+    } else if (cmd === 'add') {
+      if (!targetId || isNaN(targetId)) {
+        await ctx.reply('❌ Vui lòng cung cấp ID hợp lệ. Ví dụ: /whitelistbot add 123456789');
+        return;
+      }
+      const added = store.addWhitelistedBot(targetId);
+      if (added) {
+        await ctx.reply(`✅ Đã thêm bot <code>${targetId}</code> vào Whitelist.`, { parse_mode: 'HTML' });
+      } else {
+        await ctx.reply(`ℹ️ Bot <code>${targetId}</code> đã có trong Whitelist từ trước.`, { parse_mode: 'HTML' });
+      }
+    } else if (cmd === 'remove') {
+      if (!targetId || isNaN(targetId)) {
+        await ctx.reply('❌ Vui lòng cung cấp ID hợp lệ. Ví dụ: /whitelistbot remove 123456789');
+        return;
+      }
+      const removed = store.removeWhitelistedBot(targetId);
+      if (removed) {
+        await ctx.reply(`✅ Đã xóa bot <code>${targetId}</code> khỏi Whitelist.`, { parse_mode: 'HTML' });
+      } else {
+        await ctx.reply(`ℹ️ Bot <code>${targetId}</code> không có trong Whitelist.`, { parse_mode: 'HTML' });
+      }
+    } else {
+      await ctx.reply('ℹ️ Cú pháp: /whitelistbot [list | add <id> | remove <id>]');
+    }
+  });
+
   tgBot.command('admin', async (ctx) => {
     if (ctx.chat.id !== config.telegram.groupId) return;
 
@@ -1800,6 +1860,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
     const markup = {
       inline_keyboard: [
         [{ text: '📊 Trạng thái', callback_data: 'admin:status' }],
+        [{ text: '🤖 Quản lý Whitelist Bot', callback_data: 'admin:whitelist:menu' }],
         [{ text: '🗄 Dung lượng cache', callback_data: 'admin:cache' }],
         [{ text: '🔍 Tra mapping', callback_data: 'admin:lookup' }],
         [{ text: '🔄 Cập nhật tiền tố tên topics', callback_data: 'admin:migrate_names' }],
@@ -2055,6 +2116,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
         const markup = {
           inline_keyboard: [
             [{ text: '📊 Trạng thái', callback_data: 'admin:status' }],
+            [{ text: '🤖 Quản lý Whitelist Bot', callback_data: 'admin:whitelist:menu' }],
             [{ text: '🗄 Dung lượng cache', callback_data: 'admin:cache' }],
             [{ text: '🔍 Tra mapping', callback_data: 'admin:lookup' }],
             [{ text: '🔄 Cập nhật tiền tố tên topics', callback_data: 'admin:migrate_names' }],
@@ -2143,6 +2205,56 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
           '<code>/admin lookup</code>',
           { parse_mode: 'HTML', reply_markup: adminBackMarkup() },
         );
+        return;
+      }
+      if (action === 'whitelist:menu') {
+        const bots = store.getWhitelistedBots();
+        const kb: import('telegraf/types').InlineKeyboardButton[][] = [];
+        if (bots.length > 0) {
+          for (const botId of bots) {
+            kb.push([{ text: `❌ Xóa bot ${botId}`, callback_data: `admin:whitelist:remove:${botId}` }]);
+          }
+        }
+        kb.push([{ text: '➕ Thêm Bot', callback_data: 'admin:whitelist:add' }]);
+        kb.push([{ text: '◀️ Quay lại', callback_data: 'admin:menu' }]);
+        
+        const text = `🤖 <b>QUẢN LÝ WHITELIST BOT</b>\n━━━━━━━━━━━━━━━━\n` +
+          `Các bot có trong danh sách này sẽ được phép gửi tin nhắn vào topic và đồng bộ sang Zalo.\n\n` +
+          `Hiện có: <b>${bots.length}</b> bot.`;
+        
+        await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: kb } });
+        return;
+      }
+      if (action === 'whitelist:add') {
+        await ctx.editMessageText(
+          '➕ <b>THÊM BOT VÀO WHITELIST</b>\n' +
+          '━━━━━━━━━━━━━━━━\n' +
+          'Để thêm bot, vui lòng dùng lệnh sau trong nhóm:\n' +
+          '<code>/whitelistbot add <bot_id></code>',
+          { parse_mode: 'HTML', reply_markup: adminBackMarkup() },
+        );
+        return;
+      }
+      if (action.startsWith('whitelist:remove:')) {
+        const targetId = Number(action.split(':')[2]);
+        store.removeWhitelistedBot(targetId);
+        await ctx.answerCbQuery(`Đã xóa bot ${targetId}`);
+        // Go back to whitelist menu
+        const bots = store.getWhitelistedBots();
+        const kb: import('telegraf/types').InlineKeyboardButton[][] = [];
+        if (bots.length > 0) {
+          for (const botId of bots) {
+            kb.push([{ text: `❌ Xóa bot ${botId}`, callback_data: `admin:whitelist:remove:${botId}` }]);
+          }
+        }
+        kb.push([{ text: '➕ Thêm Bot', callback_data: 'admin:whitelist:add' }]);
+        kb.push([{ text: '◀️ Quay lại', callback_data: 'admin:menu' }]);
+        
+        const text = `🤖 <b>QUẢN LÝ WHITELIST BOT</b>\n━━━━━━━━━━━━━━━━\n` +
+          `Các bot có trong danh sách này sẽ được phép gửi tin nhắn vào topic và đồng bộ sang Zalo.\n\n` +
+          `Hiện có: <b>${bots.length}</b> bot.`;
+        
+        await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: kb } });
         return;
       }
       return;
@@ -2470,7 +2582,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
   tgBot.on('message', async (ctx) => {
     try {
       const msg = ctx.message;
-      if (ctx.from?.is_bot) return;
+      if (ctx.from?.is_bot && !store.isWhitelistedBot(ctx.from.id)) return;
       // Only handle messages from our bridge group
       if (ctx.chat.id !== config.telegram.groupId) return;
 
