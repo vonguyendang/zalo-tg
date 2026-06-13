@@ -26,8 +26,20 @@
 
 <br />
 
-> **Vietnamese documentation:** [README.vi.md](README.vi.md)
+<details>
+  <summary><b>📖 Documentation Menu</b></summary>
+  <ul align="left">
+    <li><a href="README.md">Home (README)</a></li>
+    <li><a href="USER_GUIDE.md">User Guide</a></li>
+    <li><a href="LOCAL_BOT_API_SETUP.md">Local Bot API Setup</a></li>
+    <li><a href="DEPLOY_HOME_SERVER.md">Home Server Deployment</a></li>
+    <li><a href="quick-start-script/GUIDE%20automation.md">Mac Quick Start - Automator</a></li>
+    <li><a href="quick-start-script/GUIDE%20command.md">Mac Quick Start - Command</a></li>
+  </ul>
+</details>
 
+<br>
+<strong>English</strong> | <a href="README.vi.md">Tiếng Việt</a>
 </div>
 
 ---

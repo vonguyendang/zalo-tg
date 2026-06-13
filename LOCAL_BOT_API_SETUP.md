@@ -1,5 +1,23 @@
 # Local Telegram Bot API Server Setup Guide
 
+<div align="center">
+  <strong>English</strong> | <a href="LOCAL_BOT_API_SETUP.vi.md">Tiếng Việt</a>
+</div>
+<br>
+<details>
+  <summary><b>📖 Documentation Menu</b></summary>
+  <ul>
+    <li><a href="README.md">Home (README)</a></li>
+    <li><a href="USER_GUIDE.md">User Guide</a></li>
+    <li><a href="LOCAL_BOT_API_SETUP.md">Local Bot API Setup</a></li>
+    <li><a href="DEPLOY_HOME_SERVER.md">Home Server Deployment</a></li>
+    <li><a href="quick-start-script/GUIDE%20automation.md">Mac Quick Start - Automator</a></li>
+    <li><a href="quick-start-script/GUIDE%20command.md">Mac Quick Start - Command</a></li>
+  </ul>
+</details>
+
+---
+
 ## Overview
 
 The official Telegram Bot API (api.telegram.org) has a **20 MB file size limit** for downloads. To transfer files larger than 20 MB, you need to run a **local Telegram Bot API server** on your machine with the `--local` flag, which allows transfers up to **2 GB**.

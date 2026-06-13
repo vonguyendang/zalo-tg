@@ -1,5 +1,23 @@
 # Hướng Dẫn Sử Dụng ZaloBot (Phiên bản Đa Tài Khoản & Mac Menu Bar)
 
+<div align="center">
+  <strong>Tiếng Việt</strong> | <a href="USER_GUIDE.md">English</a>
+</div>
+<br>
+<details>
+  <summary><b>📖 Menu Tài Liệu</b></summary>
+  <ul>
+    <li><a href="README.vi.md">Trang chủ (README)</a></li>
+    <li><a href="HUONG_DAN_SU_DUNG.md">Hướng dẫn sử dụng</a></li>
+    <li><a href="LOCAL_BOT_API_SETUP.vi.md">Cài đặt Local Bot API</a></li>
+    <li><a href="DEPLOY_HOME_SERVER.vi.md">Triển khai máy chủ cá nhân</a></li>
+    <li><a href="quick-start-script/HDSD%20file%20automation.md">Mac Quick Start - Automator</a></li>
+    <li><a href="quick-start-script/HDSD%20file%20command.md">Mac Quick Start - Command</a></li>
+  </ul>
+</details>
+
+---
+
 Phiên bản này đã được nâng cấp mạnh mẽ để hỗ trợ **nhiều tài khoản Zalo cùng lúc** trên một Bot Telegram duy nhất, đồng thời đi kèm với **Ứng dụng Menu Bar tiện lợi cho macOS**.
 
 ---
