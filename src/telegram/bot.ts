@@ -24,6 +24,7 @@ const BOT_COMMANDS = [
   { command: 'joingroup',      description: 'Tham gia nhóm Zalo qua link mời' },
   { command: 'leavegroup',     description: 'Rời nhóm Zalo của topic hiện tại' },
   { command: 'status',         description: 'Xem trạng thái kết nối & thống kê bridge' },
+  { command: 'restart',        description: 'Khởi động lại bridge (chỉ admin)' },
   { command: 'admin',          description: 'Admin panel: trạng thái, cache, tra mapping' },
   { command: 'update',         description: 'Kiểm tra bản cập nhật mới cho bridge' },
 ];
@@ -33,6 +34,13 @@ export const tgBot = new Telegraf(config.telegram.token, {
   telegram: config.telegram.localServer
     ? { apiRoot: config.telegram.localServer, agent: localAgent }
     : { agent },
+});
+
+// Keep polling alive when one update handler fails. Without an explicit catch,
+// Telegraf can reject launch() and leave the process half-alive: Zalo→Telegram
+// listeners still work while Telegram→Zalo silently stops consuming updates.
+tgBot.catch((err, ctx) => {
+  console.error(`[Telegram] Update ${ctx.update.update_id} failed:`, err);
 });
 
 export async function syncTelegramCommands(): Promise<void> {

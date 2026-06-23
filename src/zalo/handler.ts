@@ -1,6 +1,7 @@
 import { ThreadType, FriendEventType } from 'zca-js';
 import type { TelegramEmoji } from 'telegraf/types';
 import { createReadStream } from 'fs';
+import { pathToFileURL } from 'url';
 import path from 'path';
 import QRCode from 'qrcode';
 
@@ -10,7 +11,7 @@ import { ZALO_MSG_TYPES } from './types.js';
 import { store } from '../store.js';
 import { tgBot } from '../telegram/bot.js';
 import { config } from '../config.js';
-import { downloadToTemp, cleanTemp } from '../utils/media.js';
+import { downloadToTemp, cleanTemp, sanitizeFileName } from '../utils/media.js';
 import { applyZaloMarkupHtml, formatGroupMsgHtml, formatGroupMsg, groupCaption, topicName, truncate, escapeHtml } from '../utils/format.js';
 import type { ZaloStyle } from '../utils/format.js';
 import { msgStore, userCache, pollStore, sentMsgStore, zaloAlbumStore, reactionEchoStore, reactionSummaryStore, reactionEventDedupeStore, aliasCache, friendsCache, recentlyRecalledMsgIds, type ZaloQuoteData } from '../store.js';
@@ -240,15 +241,25 @@ async function isMutedOnZalo(api: ZaloAPI, threadId: string, type: 0 | 1): Promi
 // many messages arrive concurrently for the same conversation (e.g. 20-photo album).
 const _pendingTopics = new Map<string, Promise<number>>();
 
-async function resolveUserDisplayName(api: ZaloAPI, uid: string | undefined, fallback = 'ai đó'): Promise<string> {
+async function resolveUserDisplayName(
+  api: ZaloAPI,
+  uid: string | undefined,
+  fallback = 'ai đó',
+  groupId?: string,
+): Promise<string> {
   const cleanUid = uid?.trim();
   if (!cleanUid) return fallback;
 
   const friend = friendsCache.get(cleanUid);
   const contactName = friend?.alias?.trim()
-    || friend?.displayName?.trim()
-    || aliasCache.get(cleanUid)?.trim();
+    || aliasCache.get(cleanUid)?.trim()
+    || friend?.displayName?.trim();
   if (contactName) return contactName;
+
+  if (groupId) {
+    const groupName = userCache.getNameInGroup(cleanUid, groupId)?.trim();
+    if (groupName) return groupName;
+  }
 
   const cached = userCache.getName(cleanUid);
   if (cached?.trim()) return cached;
@@ -437,6 +448,13 @@ function parseContent(raw: string | ZaloMediaContent | Record<string, unknown>):
   return { text: null, media: raw as ZaloMediaContent };
 }
 
+/** Prefer zero-copy file URIs with telegram-bot-api --local. */
+function telegramMediaFile(filePath: string): string | { source: ReturnType<typeof createReadStream> } {
+  return config.telegram.localServer
+    ? pathToFileURL(filePath).toString()
+    : { source: createReadStream(filePath) };
+}
+
 // ── Poll helpers ─────────────────────────────────────────────────────────────
 
 import type { PollOptions } from 'zca-js';
@@ -447,7 +465,8 @@ function buildScoreText(header: string, options: Pick<PollOptions, 'content' | '
     const pct = total > 0 ? Math.round((o.votes / total) * 100) : 0;
     const bar = '█'.repeat(Math.round(pct / 10)) + '░'.repeat(10 - Math.round(pct / 10));
     return `${escapeHtml(o.content)}\n  ${bar} ${o.votes} phiếu (${pct}%)`;
-  });
+});
+
   const status = closed ? ' <i>[Đã đóng]</i>' : '';
   return `📊 <b>${escapeHtml(header)}</b>${status}\n\nTổng: ${total} phiếu\n\n${lines.join('\n\n')}`;
 }
@@ -468,6 +487,61 @@ const _inFlightMsgIds = new Set<string>();
  *  through the exact same pipeline AND await each one (guaranteeing order,
  *  which `listener.emit` cannot since the handler is async and not awaited). */
 let _activeMessageHandler: ((msg: ZaloMessage) => Promise<void>) | null = null;
+
+interface PendingHistoryRequest {
+  api: ZaloAPI;
+  groupId: string;
+  count: number;
+  pages: number;
+  messages: ZaloMessage[];
+  seen: Set<string>;
+  timer: ReturnType<typeof setTimeout>;
+  resolve: (messages: ZaloMessage[]) => void;
+  reject: (err: Error) => void;
+}
+
+let _pendingHistoryRequest: PendingHistoryRequest | null = null;
+
+function finishHistoryRequest(req: PendingHistoryRequest, err?: Error): void {
+  if (_pendingHistoryRequest !== req) return;
+  clearTimeout(req.timer);
+  _pendingHistoryRequest = null;
+  if (err) { req.reject(err); return; }
+  const newest = [...req.messages]
+    .sort((a, b) => Number(b?.data?.ts ?? 0) - Number(a?.data?.ts ?? 0))
+    .slice(0, req.count)
+    .sort((a, b) => Number(a?.data?.ts ?? 0) - Number(b?.data?.ts ?? 0));
+  req.resolve(newest);
+}
+
+/** Fetch group history through the working listener WebSocket protocol. */
+export function requestGroupHistory(
+  api: ZaloAPI,
+  groupId: string,
+  count: number,
+): Promise<ZaloMessage[]> {
+  if (_pendingHistoryRequest) {
+    return Promise.reject(new Error('Đang có một yêu cầu /history khác chạy.'));
+  }
+  return new Promise<ZaloMessage[]>((resolve, reject) => {
+    const req: PendingHistoryRequest = {
+      api,
+      groupId,
+      count,
+      pages: 0,
+      messages: [],
+      seen: new Set(),
+      resolve,
+      reject,
+      timer: setTimeout(() => {
+        if (req.messages.length > 0) finishHistoryRequest(req);
+        else finishHistoryRequest(req, new Error('Zalo không trả dữ liệu lịch sử trong 20 giây.'));
+      }, 20_000),
+    };
+    _pendingHistoryRequest = req;
+    api.listener.requestOldMessages(ThreadType.Group);
+  });
+}
 
 /**
  * Replay messages through the live message pipeline, one at a time, awaiting
@@ -636,11 +710,9 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
       const _eagerMediaUrl = (() => {
         if (msgType === ZALO_MSG_TYPES.VIDEO || msgType === ZALO_MSG_TYPES.VOICE ||
             msgType === ZALO_MSG_TYPES.GIF   || msgType === ZALO_MSG_TYPES.FILE) return media.href;
-        if (msgType === ZALO_MSG_TYPES.PHOTO) {
-          let u = media.href;
-          try { const p = JSON.parse(media.params ?? '{}') as { hd?: string }; if (p.hd) u = p.hd; } catch {}
-          return u;
-        }
+        // Photos are deliberately downloaded after the short album debounce.
+        // Starting one eager download per event leaks temp files when several
+        // events are merged into a single Telegram media group.
         return undefined;
       })();
       const _extGuess = _eagerMediaUrl
@@ -660,7 +732,9 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
       // contain filenames or metadata (e.g. "My Documents") instead of the sender's
       // real name. The default fallback chain (UID → 'ai đó') is safer.
       let displayName = senderName;
-      let bridgeSenderName = msg.isSelf ? senderName : await resolveUserDisplayName(api, senderUid);
+      let bridgeSenderName = msg.isSelf
+        ? senderName
+        : await resolveUserDisplayName(api, senderUid, 'ai đó', type === ThreadType.Group ? zaloId : undefined);
       let groupAvatarUrl: string | undefined;
       if (type === ThreadType.Group) {
         const info = await getCachedGroupInfo(api, zaloId);
@@ -852,54 +926,56 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
           albumKey,
           url,
           zaloMsgIds,
+          photoCaption,
           { senderName: bridgeSenderName, topicId, tgBase, zaloQuote: zaloQuoteData },
           async (buf) => {
-            if (buf.urls.length === 1) {
-              // Single photo — reuse eagerly started download (likely already done)
-              const singleUrl = buf.urls[0]!;
-              const localPath = await (earlyDlPromise ?? downloadToTemp(singleUrl, `photo_${Date.now()}.jpg`));
-              const stream = createReadStream(localPath);
+            if (buf.items.length === 1) {
+              // Single photo
+              const singleUrl = buf.items[0]!.url;
+              const localPath = await downloadToTemp(singleUrl, `photo_${Date.now()}.jpg`);
               try {
                 const sent = await tg.sendPhoto(
                   config.telegram.groupId,
-                  { source: stream },
+                  telegramMediaFile(localPath),
                   {
                     ...buf.tgBase,
                     parse_mode: 'HTML' as const,
-                    caption: photoCaption
-                      ? `${groupCaption(buf.senderName)}
-${escapeHtml(photoCaption)}`
+                    caption: buf.caption
+                      ? `${groupCaption(buf.senderName)}\n${escapeHtml(buf.caption)}`
                       : groupCaption(buf.senderName),
                   },
                 );
                 // Use buf.zaloQuote which already has the correct cliMsgId and
                 // parsed media content object (not raw JSON string).
-                msgStore.save(sent.message_id, buf.zaloMsgIds, buf.zaloQuote!);
+                msgStore.save(sent.message_id, buf.items[0]!.msgIds, buf.items[0]!.zaloQuote!);
+                console.log(`[Zalo→TG] Photo sent: topic=${buf.topicId} msgId=${sent.message_id}`);
               } finally { await cleanTemp(localPath); }
             } else {
               // Multi-photo album — download all concurrently and send as media group
               const localPaths: string[] = [];
               try {
-                const dlResults = await Promise.allSettled(buf.urls.map(u => downloadToTemp(u, `photo_${Date.now()}.jpg`)));
-                const dlPaths = dlResults.flatMap(r => {
-                  if (r.status === 'fulfilled') return [r.value];
+                const dlPromises = buf.items.map(item =>
+                  downloadToTemp(item.url, `photo_${Date.now()}.jpg`));
+                const dlResults = await Promise.allSettled(dlPromises);
+                const downloaded = dlResults.flatMap((r, index) => {
+                  if (r.status === 'fulfilled') return [{ localPath: r.value, item: buf.items[index]! }];
                   console.warn('[ZaloHandler] Album: skipping failed photo download:', r.reason);
                   return [];
                 });
-                if (dlPaths.length === 0) return;
-                localPaths.push(...dlPaths);
-                const captionText = photoCaption
-                  ? `${groupCaption(buf.senderName)}
-${escapeHtml(photoCaption)}`
+                if (downloaded.length === 0) return;
+                localPaths.push(...downloaded.map(d => d.localPath));
+                const captionText = buf.caption
+                  ? `${groupCaption(buf.senderName)}\n${escapeHtml(buf.caption)}`
                   : groupCaption(buf.senderName);
                 // Telegram limits media groups to 10 items — split into batches
                 const BATCH = 10;
+                const allSentMsgs: { message_id: number }[] = [];
                 for (let i = 0; i < localPaths.length; i += BATCH) {
                   const batch = localPaths.slice(i, i + BATCH);
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   const mediaItems: any[] = batch.map((lp, j) => ({
                     type: 'photo',
-                    media: { source: createReadStream(lp) },
+                    media: telegramMediaFile(lp),
                     ...(i === 0 && j === 0 && captionText ? { caption: captionText, parse_mode: 'HTML' } : {}),
                   }));
                   const sentMsgs = await tg.sendMediaGroup(
@@ -907,12 +983,14 @@ ${escapeHtml(photoCaption)}`
                     mediaItems,
                     { ...buf.tgBase, message_thread_id: buf.topicId } as Parameters<typeof tg.sendMediaGroup>[2],
                   );
-                  // Save mapping for every photo so replying to ANY album photo
-                  // produces a valid Zalo quote
-                  for (const sentMsg of sentMsgs) {
-                    msgStore.save(sentMsg.message_id, buf.zaloMsgIds, buf.zaloQuote!);
-                  }
+                  allSentMsgs.push(...sentMsgs);
                 }
+                // Save per-photo mapping so replying to each photo quotes the correct Zalo message
+                for (let i = 0; i < allSentMsgs.length && i < downloaded.length; i++) {
+                  const item = downloaded[i]!.item;
+                  msgStore.save(allSentMsgs[i]!.message_id, item.msgIds, item.zaloQuote!);
+                }
+                console.log(`[Zalo→TG] Photo album sent: topic=${buf.topicId} photos=${allSentMsgs.length}`);
               } finally {
                 for (const lp of localPaths) await cleanTemp(lp);
               }
@@ -972,7 +1050,7 @@ ${escapeHtml(photoCaption)}`
         try {
           const sent = await tg.sendDocument(
             config.telegram.groupId,
-            { source: stream, filename: fileName },
+            { source: stream, filename: sanitizeFileName(fileName) },
             tgOpts,
           );
           saveTgMapping(sent);
@@ -1544,8 +1622,29 @@ ${escapeHtml(photoCaption)}`
 
   // Catch-up stream from zca-js after reconnect.
   // Replays recent messages through the same main handler to refill bridges.
-  api.listener.on('old_messages', (messages: ZaloMessage[]) => {
+  api.listener.on('old_messages', (messages: ZaloMessage[], oldType: ThreadType) => {
     if (!Array.isArray(messages) || messages.length === 0) return;
+    const req = _pendingHistoryRequest;
+    if (req && req.api === api && oldType === ThreadType.Group) {
+      req.pages += 1;
+      for (const msg of messages) {
+        if (String(msg.threadId) !== req.groupId) continue;
+        const id = String(msg.data?.msgId ?? `${msg.data?.ts}:${req.messages.length}`);
+        if (req.seen.has(id)) continue;
+        req.seen.add(id);
+        req.messages.push(msg);
+      }
+      if (req.messages.length >= req.count || req.pages >= 5) {
+        finishHistoryRequest(req);
+      } else {
+        const oldest = [...messages]
+          .sort((a, b) => Number(a?.data?.ts ?? 0) - Number(b?.data?.ts ?? 0))[0];
+        const lastMsgId = oldest?.data?.msgId ? String(oldest.data.msgId) : null;
+        if (lastMsgId) api.listener.requestOldMessages(ThreadType.Group, lastMsgId);
+        else finishHistoryRequest(req);
+      }
+      return;
+    }
     const sorted = [...messages].sort((a, b) => Number(a?.data?.ts ?? 0) - Number(b?.data?.ts ?? 0));
     console.log(`[Zalo→TG] Catch-up old_messages: replay ${sorted.length} item(s)`);
     for (const oldMsg of sorted) {
@@ -1751,7 +1850,12 @@ ${escapeHtml(photoCaption)}`
         }
       }
 
-      const actorName = rawName || await resolveUserDisplayName(api, actorUid || undefined, 'ai đó');
+      const actorName = await resolveUserDisplayName(
+        api,
+        actorUid || undefined,
+        rawName || 'ai đó',
+        type === 1 ? zaloId : undefined,
+      );
 
       // Aggregate reactions: update the summary entry then debounce send/edit
       const entry = reactionSummaryStore.upsert(tgMsgId, emoji, actorName);

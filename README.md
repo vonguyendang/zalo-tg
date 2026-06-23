@@ -571,6 +571,8 @@ For platform-specific setup instructions, including macOS, Linux, Windows, syste
 | `/loginapp` | Starts Zalo QR login through the PC App API and persists the session to `app-session.json`. Enables lower-pressure group-member lookups. |
 | `/search <query>` | Searches the Zalo friends list and allows the user to create a direct-message topic from a selected result. |
 | `/recall` | Retracts a message previously sent by the bot from Telegram to Zalo. Must be used as a reply to the target message. |
+| `/history [N]` | Replays up to 50 older group messages through the listener WebSocket. |
+| `/restart` | Restarts the bridge after confirmation. Restricted to Telegram administrators. |
 | `/topic list` | Lists active Telegram-topic-to-Zalo-conversation mappings. |
 | `/topic info` | Shows the Zalo conversation metadata associated with the current topic. |
 | `/topic delete` | Removes the mapping associated with the current topic. |
@@ -726,5 +728,4 @@ Thanks to everyone who has contributed to this project.
 Contributions are welcome. Bug fixes, documentation improvements, architectural refinements, compatibility patches, and feature proposals can be submitted through pull requests.
 
 To be listed as a contributor, submit a meaningful contribution through a pull request that is reviewed and merged into the project.
-
 
