@@ -13,6 +13,11 @@ while true; do
   npm start
   EXIT_CODE=$?
 
+  if [ "$EXIT_CODE" = "43" ]; then
+    echo "[Runner] Restart signal received (code 43). Restarting bridge..."
+    continue
+  fi
+
   if [ "$EXIT_CODE" = "42" ]; then
     echo "[Runner] Update signal received (code 42). Pulling latest changes..."
     

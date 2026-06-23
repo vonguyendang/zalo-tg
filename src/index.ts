@@ -158,6 +158,7 @@ async function main(): Promise<void> {
     { command: 'recall',         description: 'Thu hồi tin nhắn (reply vào tin đã gửi)' },
     { command: 'admin',          description: 'Admin panel: trạng thái, cache, tra mapping' },
     { command: 'status',         description: 'Xem trạng thái bridge: uptime, số topic, Zalo' },
+    { command: 'restart',        description: 'Khởi động lại bridge (chỉ admin)' },
     { command: 'update',         description: 'Kiểm tra bản cập nhật mới' },
   ]).catch(() => undefined);
 

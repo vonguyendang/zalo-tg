@@ -5,11 +5,18 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import os from 'os';
+import { config } from '../config.js';
 
-const TMP_DIR = path.join(os.tmpdir(), 'zalo-tg');
+// Local Bot API reads outgoing files from a shared host/container path.
+// macOS os.tmpdir() points to /var/folders, while our server and Docker setup
+// share /tmp, so keep bridge media there whenever local mode is enabled.
+const TMP_ROOT = config.telegram.localServer && process.platform !== 'win32'
+  ? '/tmp'
+  : os.tmpdir();
+const TMP_DIR = path.join(TMP_ROOT, 'zalo-tg');
 
 /** Keep readable Unicode filenames, but remove path/control chars unsafe on disk. */
-function sanitizeFileName(fileName: string, fallback = `download_${Date.now()}`): string {
+export function sanitizeFileName(fileName: string, fallback = `download_${Date.now()}`): string {
   const cleaned = fileName
     .normalize('NFC')
     .replace(/[\\/:*?"<>|\u0000-\u001F]/g, '_')

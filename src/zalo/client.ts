@@ -10,11 +10,27 @@ import type { ZaloAPI } from './types.js';
 
 // Use os.tmpdir() so it works on Windows (e.g. C:\Users\...\AppData\Local\Temp)
 // as well as macOS/Linux (/tmp or /var/folders/...).
-const QR_TMP_DIR = path.join(os.tmpdir(), 'zalo-tg');
+// telegram-bot-api is started with --temp-dir=/tmp in this project. In local
+// mode it reads the QR by absolute path, so both processes must use that shared
+// root (macOS os.tmpdir() normally points at /var/folders/... instead).
+const QR_TMP_ROOT = config.telegram.localServer && process.platform !== 'win32'
+  ? '/tmp'
+  : os.tmpdir();
+const QR_TMP_DIR = path.join(QR_TMP_ROOT, 'zalo-tg');
 mkdirSync(QR_TMP_DIR, { recursive: true });
 const QR_IMAGE_PATH = path.join(QR_TMP_DIR, 'zalo-qr.png');
 
 let _api: ZaloAPI | null = null;
+let _activeQRAbort: (() => void) | null = null;
+
+/** Abort the currently active Web QR login, if any. */
+export function cancelActiveQRLogin(): boolean {
+  const abort = _activeQRAbort;
+  if (!abort) return false;
+  _activeQRAbort = null;
+  abort();
+  return true;
+}
 
 // ── imageMetadataGetter ───────────────────────────────────────────────────────
 // Required by zca-js for uploadAttachment (images/GIFs).
@@ -73,14 +89,17 @@ async function runQRLogin(
   zalo: InstanceType<typeof Zalo>,
   hooks: QRLoginHooks = {},
 ): Promise<ZaloAPI> {
+  let expiredCount = 0;
+  let qrDeliveryError: unknown;
   const callback: LoginQRCallback = (event) => {
     switch (event.type) {
 
       case LoginQRCallbackEventType.QRCodeGenerated: {
         const { code } = event.data;
+        _activeQRAbort = event.actions.abort;
 
         // Save QR image first, then notify hooks
-        const savePromise = (event.actions.saveToFile(QR_IMAGE_PATH) as Promise<unknown>)
+        const savePromise = event.actions.saveToFile(QR_IMAGE_PATH)
           .then(async () => {
             // Print to terminal
             await new Promise<void>((res) => {
@@ -97,7 +116,13 @@ async function runQRLogin(
             // Notify external hook (e.g. send to Telegram)
             await hooks.onQRReady?.(QR_IMAGE_PATH, code);
           })
-          .catch((err: unknown) => console.error('[Zalo] QR hook error:', err));
+          .catch((err: unknown) => {
+            qrDeliveryError = err;
+            console.error('[Zalo] QR delivery failed:', err);
+            // A login cannot succeed if the user never receives the QR. Abort so
+            // Telegram can report the error and the in-progress lock is cleared.
+            event.actions.abort();
+          });
 
         void savePromise;
         break;
@@ -106,7 +131,11 @@ async function runQRLogin(
       case LoginQRCallbackEventType.QRCodeExpired: {
         console.log('\n[Zalo] QR hết hạn, đang tạo mã mới...');
         void hooks.onExpired?.().catch((e: unknown) => console.error(e));
-        event.actions.retry();
+        expiredCount += 1;
+        // Avoid leaving /login locked forever when nobody can scan the QR.
+        // Two retries give the user roughly five minutes in total.
+        if (expiredCount <= 2) event.actions.retry();
+        else event.actions.abort();
         break;
       }
 
@@ -132,7 +161,20 @@ async function runQRLogin(
     }
   };
 
-  const api = await zalo.loginQR({ qrPath: QR_IMAGE_PATH }, callback);
+  let api: Awaited<ReturnType<typeof zalo.loginQR>>;
+  try {
+    api = await zalo.loginQR({ qrPath: QR_IMAGE_PATH }, callback);
+  } catch (err) {
+    if (qrDeliveryError) {
+      const detail = qrDeliveryError instanceof Error
+        ? qrDeliveryError.message
+        : String(qrDeliveryError);
+      throw new Error(`Không thể gửi ảnh QR lên Telegram: ${detail}`, { cause: qrDeliveryError });
+    }
+    throw err;
+  } finally {
+    _activeQRAbort = null;
+  }
   if (!api) throw new Error('[Zalo] QR login failed – no API returned.');
   console.log('\n[Zalo] Đăng nhập thành công ✓');
   return api as ZaloAPI;

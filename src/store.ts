@@ -387,6 +387,8 @@ const _uidToName      = new Map<string, string>();
 const _normToUid      = new Map<string, string>();
 /** zaloId → (normalizedName → uid) — collision-safe per-group lookup */
 const _groupNameToUid = new Map<string, Map<string, string>>();
+/** zaloId → (uid → exact display name) — prevents group names polluting global contact names */
+const _groupUidToName = new Map<string, Map<string, string>>();
 
 function _normName(name: string): string {
   return name
@@ -407,6 +409,8 @@ interface UserCacheDisk {
   u: Record<string, string>;
   /** groupId → { normName → uid } */
   g: Record<string, Record<string, string>>;
+  /** groupId → { uid → exact displayName } (added in v3; optional for migration) */
+  gn?: Record<string, Record<string, string>>;
 }
 
 function _loadUserCache(): void {
@@ -421,6 +425,9 @@ function _loadUserCache(): void {
       const m = new Map<string, string>();
       for (const [norm, uid] of Object.entries(members)) m.set(norm, uid);
       _groupNameToUid.set(gid, m);
+    }
+    for (const [gid, members] of Object.entries(raw.gn ?? {})) {
+      _groupUidToName.set(gid, new Map(Object.entries(members)));
     }
     console.log(`[userCache] Loaded ${_uidToName.size} users from disk`);
   } catch (e) {
@@ -440,12 +447,17 @@ function _scheduleUserCachePersist(): void {
     _userCacheDirty = false;
     try {
       mkdirSync(path.dirname(_userCacheFile), { recursive: true });
-      const disk: UserCacheDisk = { u: {}, g: {} };
+      const disk: UserCacheDisk = { u: {}, g: {}, gn: {} };
       for (const [uid, name] of _uidToName) disk.u[uid] = name;
       for (const [gid, m] of _groupNameToUid) {
         const obj: Record<string, string> = {};
         for (const [norm, uid] of m) obj[norm] = uid;
         disk.g[gid] = obj;
+      }
+      for (const [gid, m] of _groupUidToName) {
+        const obj: Record<string, string> = {};
+        for (const [uid, name] of m) obj[uid] = name;
+        disk.gn![gid] = obj;
       }
       const _tmpUser = _userCacheFile + '.tmp';
       writeFileSync(_tmpUser, gzipSync(JSON.stringify(disk), { level: 9 }));
@@ -477,6 +489,7 @@ export const userCache = {
             if (uid2 === firstUid) { nameMap.delete(norm); break; }
           }
         }
+        for (const [, uidMap] of _groupUidToName) uidMap.delete(firstUid);
       }
     }
     _uidToName.set(uid, displayName);
@@ -491,11 +504,16 @@ export const userCache = {
 
   /** Save display name scoped to a Zalo group for collision-safe resolution. */
   saveForGroup(uid: string, displayName: string, zaloId: string): void {
-    this.save(uid, displayName);
+    // A group member's dName/profile name is contextual and must never replace
+    // the account owner's global contact-book name for that UID.
+    if (!_uidToName.has(uid)) this.save(uid, displayName);
     let m = _groupNameToUid.get(zaloId);
     if (!m) { m = new Map(); _groupNameToUid.set(zaloId, m); }
     m.set(_normName(displayName), uid);
-    // persist already scheduled by save()
+    let names = _groupUidToName.get(zaloId);
+    if (!names) { names = new Map(); _groupUidToName.set(zaloId, names); }
+    names.set(uid, displayName);
+    _scheduleUserCachePersist();
   },
 
   /** Resolve UID by name, preferring group-specific lookup over global. */
@@ -507,6 +525,11 @@ export const userCache = {
   /** Get display name for a UID. */
   getName(uid: string): string | undefined {
     return _uidToName.get(uid);
+  },
+
+  /** Exact display name for a UID inside one group. */
+  getNameInGroup(uid: string, zaloId: string): string | undefined {
+    return _groupUidToName.get(zaloId)?.get(uid);
   },
 
   stats(): { users: number; groups: number } {
@@ -576,10 +599,13 @@ export interface ZaloFriend {
 }
 
 function upsertAliasFromFriend(friend: ZaloFriend): void {
-  const preferredName = friend.alias?.trim() || friend.displayName?.trim();
-  if (!preferredName) return;
-  _aliasMap.set(friend.userId, preferredName);
-  _aliasNormToUid.set(_normName(preferredName), friend.userId);
+  // Only explicit aliases belong in aliasCache. Copying displayName here made
+  // ordinary profile/contact names masquerade as aliases and change randomly
+  // whenever getAllFriends refreshed.
+  const alias = friend.alias?.trim();
+  if (!alias) return;
+  _aliasMap.set(friend.userId, alias);
+  _aliasNormToUid.set(_normName(alias), friend.userId);
 }
 
 const FRIENDS_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -929,6 +955,10 @@ export interface MediaGroupItem {
   caption?:  string;
   captionMentions?: Array<{ pos: number; uid: string; len: number }>;
   tgMsgId?:  number;
+  isVideo?:  boolean;
+  videoWidth?: number;
+  videoHeight?: number;
+  videoDuration?: number;
 }
 
 interface MediaGroupBuffer {
@@ -948,24 +978,26 @@ export const mediaGroupStore = {
     groupId: string,
     item: MediaGroupItem,
     meta: Omit<MediaGroupBuffer, 'timer' | 'items'>,
-    onFlush: (items: MediaGroupItem[], meta: Omit<MediaGroupBuffer, 'timer' | 'items'>) => void,
+    onFlush: (items: MediaGroupItem[], meta: Omit<MediaGroupBuffer, 'timer' | 'items'>) => void | Promise<void>,
   ): void {
+    const flush = (buf: MediaGroupBuffer): void => {
+      _mgBuffers.delete(groupId);
+      void Promise.resolve(onFlush(buf.items, buf))
+        .catch(err => console.error(`[mediaGroupStore] Flush failed (groupId=${groupId}):`, err));
+    };
+    // Video updates can arrive slightly after photo updates. A wider debounce
+    // prevents one Telegram album from being split into multiple Zalo batches.
+    const FLUSH_DELAY_MS = 1_000;
     const existing = _mgBuffers.get(groupId);
     if (existing) {
       clearTimeout(existing.timer);
       existing.items.push(item);
-      existing.timer = setTimeout(() => {
-        _mgBuffers.delete(groupId);
-        onFlush(existing.items, existing);
-      }, 500);
+      existing.timer = setTimeout(() => flush(existing), FLUSH_DELAY_MS);
     } else {
       const buf: MediaGroupBuffer = {
         ...meta,
         items: [item],
-        timer: setTimeout(() => {
-          _mgBuffers.delete(groupId);
-          onFlush(buf.items, buf);
-        }, 500),
+        timer: setTimeout(() => flush(buf), FLUSH_DELAY_MS),
       };
       _mgBuffers.set(groupId, buf);
     }
@@ -974,14 +1006,19 @@ export const mediaGroupStore = {
 
 // ── Zalo album buffer (Zalo→TG multi-photo) ────────────────────────────────────
 
+interface ZaloAlbumItem {
+  url:    string;
+  msgIds: string[];
+  zaloQuote: ZaloQuoteData | undefined;
+}
+
 interface ZaloAlbumBuffer {
   timer:      ReturnType<typeof setTimeout>;
-  urls:       string[];
+  items:      ZaloAlbumItem[];
   senderName: string;
   topicId:    number;
   tgBase:     { message_thread_id: number; reply_parameters?: { message_id: number; allow_sending_without_reply: boolean }; disable_notification?: boolean };
-  zaloMsgIds: string[];
-  zaloQuote:  ZaloQuoteData | undefined;
+  caption?:   string;
 }
 
 const _zaloAlbumBuffers = new Map<string, ZaloAlbumBuffer>(); // key = `${threadId}:${uidFrom}`
@@ -991,60 +1028,45 @@ export const zaloAlbumStore = {
     key: string,
     url: string,
     msgIds: string[],
-    meta: Omit<ZaloAlbumBuffer, 'timer' | 'urls' | 'zaloMsgIds'>,
-    onFlush: (buf: Omit<ZaloAlbumBuffer, 'timer'>) => void,
-    childnumber = 0,
+    caption: string | undefined,
+    meta: Omit<ZaloAlbumBuffer, 'timer' | 'items' | 'caption'> & { zaloQuote: ZaloQuoteData | undefined },
+    onFlush: (buf: Omit<ZaloAlbumBuffer, 'timer'>) => void | Promise<void>,
+    _childnumber = 0,
   ): void {
-    // If a new album (childnumber==0) arrives while a buffer exists for
-    // the same key, flush the old buffer immediately to prevent album merging.
-    // HOWEVER, if the existing buffer already contains this exact URL, it's a
-    // Zalo re-emit (duplicate event with a different msgId) — DON'T flush,
-    // just merge msgIds into the existing buffer instead.
-    if (childnumber === 0) {
-      const existing = _zaloAlbumBuffers.get(key);
-      if (existing) {
-        if (existing.urls.includes(url)) {
-          // Duplicate re-emit — absorb into existing buffer, don't flush
-          clearTimeout(existing.timer);
-          existing.zaloMsgIds.push(...msgIds);
-          existing.timer = setTimeout(() => {
-            _zaloAlbumBuffers.delete(key);
-            onFlush({ urls: existing.urls, zaloMsgIds: existing.zaloMsgIds, ...meta });
-          }, 200);
-          console.log(`[zaloAlbumStore] Absorbed duplicate childnumber=0 event (key=${key}, url already in buffer)`);
-          return;
-        }
-        // Genuinely new album — flush old buffer first
-        clearTimeout(existing.timer);
-        _zaloAlbumBuffers.delete(key);
-        setImmediate(() => onFlush({ urls: existing.urls, zaloMsgIds: existing.zaloMsgIds, ...meta }));
-      }
-    }
+    const { zaloQuote, ...bufferMeta } = meta;
+    const flush = (buf: ZaloAlbumBuffer): void => {
+      _zaloAlbumBuffers.delete(key);
+      void Promise.resolve(onFlush({
+        items: buf.items,
+        senderName: buf.senderName,
+        topicId: buf.topicId,
+        tgBase: buf.tgBase,
+        caption: buf.caption,
+      })).catch(err => console.error(`[zaloAlbumStore] Flush failed (key=${key}):`, err));
+    };
+
+    // `childnumber` is not reliable for DM albums (Zalo commonly emits 0 for
+    // every image). Debounce by conversation+sender instead: photos arriving
+    // close together become one album, while a pause starts a new batch.
+    const FLUSH_DELAY_MS = 600;
     const existing = _zaloAlbumBuffers.get(key);
     if (existing) {
       clearTimeout(existing.timer);
-      // Deduplicate URLs — Zalo group chats can re-emit the same photo event
-      // with a different msgId, causing identical images to be buffered.
-      // Only add the URL if it's not already in the buffer.
-      if (!existing.urls.includes(url)) {
-        existing.urls.push(url);
+      if (!existing.items.some(i => i.url === url)) {
+        existing.items.push({ url, msgIds: [...msgIds], zaloQuote });
       } else {
-        console.log(`[zaloAlbumStore] Skipping duplicate URL in album buffer (key=${key}, urls=${existing.urls.length})`);
+        console.log(`[zaloAlbumStore] Skipping duplicate URL in album buffer (key=${key}, items=${existing.items.length})`);
+        const item = existing.items.find(i => i.url === url);
+        if (item) item.msgIds.push(...msgIds);
       }
-      existing.zaloMsgIds.push(...msgIds);
-      existing.timer = setTimeout(() => {
-        _zaloAlbumBuffers.delete(key);
-        onFlush({ urls: existing.urls, zaloMsgIds: existing.zaloMsgIds, ...meta });
-      }, 200);
+      if (!existing.caption && caption) existing.caption = caption;
+      existing.timer = setTimeout(() => flush(existing), FLUSH_DELAY_MS);
     } else {
       const buf: ZaloAlbumBuffer = {
-        ...meta,
-        urls: [url],
-        zaloMsgIds: [...msgIds],
-        timer: setTimeout(() => {
-          _zaloAlbumBuffers.delete(key);
-          onFlush({ urls: buf.urls, zaloMsgIds: buf.zaloMsgIds, ...meta });
-        }, 200),
+        ...bufferMeta,
+        items: [{ url, msgIds: [...msgIds], zaloQuote }],
+        caption,
+        timer: setTimeout(() => flush(buf), FLUSH_DELAY_MS),
       };
       _zaloAlbumBuffers.set(key, buf);
     }

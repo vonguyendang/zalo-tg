@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "vitest run"
+    "test": "tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
     "@types/qrcode": "^1.5.6",

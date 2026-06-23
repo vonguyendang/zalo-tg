@@ -22,7 +22,7 @@ services:
     environment:
       TELEGRAM_API_ID:   "${TG_API_ID}"
       TELEGRAM_API_HASH: "${TG_API_HASH}"
-    command: --dir=/data --temp-dir=/tmp
+    command: --local --dir=/data --temp-dir=/tmp
     volumes:
       - telegram-bot-api-data:/data
       - /tmp:/tmp
@@ -49,6 +49,8 @@ services:
     volumes:
       # Persistent data — lưu topics.json + credentials.json
       - ./data:/app/data
+      # Share generated QR paths with telegram-bot-api --local.
+      - /tmp:/tmp
     logging:
       driver: json-file
       options:
