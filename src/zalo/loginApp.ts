@@ -325,7 +325,7 @@ export async function triggerAppLogin(hooks: AppLoginHooks = {}): Promise<ZaloAP
   }
 
   const loginData = r4.data.data ?? {};
-  const uid       = String(loginData['uid'] ?? loginData['dkey'] ?? '');
+  const uid       = String(loginData['uid'] ?? '');
   const displayName: string = (() => {
     const n = loginData['send2me_name'] ?? loginData['name'] ?? loginData['zaloName'] ?? uid;
     if (typeof n === 'object' && n !== null) {
@@ -353,11 +353,12 @@ export async function triggerAppLogin(hooks: AppLoginHooks = {}): Promise<ZaloAP
 
   // Save app-session.json with zpw_enk + raw zaloapp.com cookies for direct PC App API calls
   const zpwEnk = String(loginData['zpw_enk'] ?? '');
+  const dkey   = String(loginData['dkey'] ?? '');
   if (zpwEnk) {
     const appSessionPath = path.join(path.dirname(config.zalo.credentialsPath), 'app-session.json');
     writeFileSync(
       appSessionPath,
-      JSON.stringify({ zpw_enk: zpwEnk, imei, cookies: jar.toRawPairs() }, null, 2),
+      JSON.stringify({ zpw_enk: zpwEnk, dkey: dkey || undefined, imei, cookies: jar.toRawPairs() }, null, 2),
       'utf8',
     );
     console.log(`[AppLogin] App session saved → ${appSessionPath}`);

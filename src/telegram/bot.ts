@@ -27,6 +27,7 @@ const BOT_COMMANDS = [
   { command: 'restart',        description: 'Khởi động lại bridge (chỉ admin)' },
   { command: 'admin',          description: 'Admin panel: trạng thái, cache, tra mapping' },
   { command: 'update',         description: 'Kiểm tra bản cập nhật mới cho bridge' },
+  { command: 'seed',           description: 'Xem mã seed giải mã backup Zalo' },
 ];
 
 /** Singleton Telegraf bot instance shared across the app. */

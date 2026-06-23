@@ -28,21 +28,25 @@ const PC_UA          = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTM
 
 interface AppSession {
   zpw_enk: string;
+  dkey?:   string;
   imei:    string;
   cookies: Array<{ name: string; value: string; domain: string }>;
 }
 
 let _session: AppSession | null | undefined;  // undefined = not yet loaded
 
-function loadAppSession(): AppSession | null {
+export function loadAppSession(): AppSession | null {
   if (_session !== undefined) return _session;
+  return _reloadAppSession();
+}
+
+function _reloadAppSession(): AppSession | null {
   const p = path.join(path.dirname(config.zalo.credentialsPath), 'app-session.json');
-  if (!existsSync(p)) { _session = null; return null; }
+  if (!existsSync(p)) return null;
   try {
     _session = JSON.parse(readFileSync(p, 'utf8')) as AppSession;
     return _session;
   } catch {
-    _session = null;
     return null;
   }
 }
@@ -50,6 +54,15 @@ function loadAppSession(): AppSession | null {
 /** Call this after a new /loginapp to reload the session from disk. */
 export function invalidateAppSession(): void {
   _session = undefined;
+}
+
+/**
+ * Force a fresh read from disk, ignoring the cache.
+ * Useful when the file may have been written between calls.
+ */
+export function reloadAppSession(): AppSession | null {
+  _session = undefined;
+  return _reloadAppSession();
 }
 
 // ── Crypto (same as loginApp.ts) ──────────────────────────────────────────────

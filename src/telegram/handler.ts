@@ -47,7 +47,7 @@ import { config } from '../config.js';
 import { downloadToTemp, cleanTemp, convertToM4a, extractVideoThumbnail, convertWebmToGif } from '../utils/media.js';
 import { cancelActiveQRLogin, triggerQRLogin } from '../zalo/client.js';
 import { cancelActiveAppLogin, triggerAppLogin } from '../zalo/loginApp.js';
-import { invalidateAppSession, appGetReceivedFriendRequests, appGetSentFriendRequests, appGetGroupInfo, appGetGroupMembersInfo } from '../zalo/appApi.js';
+import { loadAppSession, invalidateAppSession, appGetReceivedFriendRequests, appGetSentFriendRequests, appGetGroupInfo, appGetGroupMembersInfo } from '../zalo/appApi.js';
 import { resetMemberCacheLoaded } from '../zalo/handler.js';
 import { escapeHtml } from '../utils/format.js';
 import { requestShutdown } from '../lifecycle.js';
@@ -1508,6 +1508,27 @@ export function setupTelegramHandler(
       `📌 Topics: <b>${all.length}</b> (${groupCount} nhóm, ${dmCount} DM)` +
       localApiSection,
       { parse_mode: 'HTML' },
+    );
+  });
+
+  // ── /seed — show backup decryption seed ──────────────────────────────────
+  tgBot.command('seed', async (ctx) => {
+    if (ctx.chat.id !== config.telegram.groupId) return;
+    const replyOpts = ctx.message.message_thread_id
+      ? { message_thread_id: ctx.message.message_thread_id }
+      : {};
+    const sess = loadAppSession();
+    if (!sess) {
+      await ctx.reply('❌ Chưa có session app. Dùng <code>/loginapp</code> trước.', { parse_mode: 'HTML', ...replyOpts });
+      return;
+    }
+    if (!sess.dkey) {
+      await ctx.reply('❌ Không tìm thấy <code>dkey</code> trong session. Đăng nhập lại bằng <code>/loginapp</code> để lấy.', { parse_mode: 'HTML', ...replyOpts });
+      return;
+    }
+    await ctx.reply(
+      `🔑 <b>Backup decryption seed (dkey)</b>\n\n<code>${sess.dkey}</code>`,
+      { parse_mode: 'HTML', ...replyOpts },
     );
   });
 
