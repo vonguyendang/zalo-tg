@@ -11,7 +11,7 @@ import { ZALO_MSG_TYPES } from './types.js';
 import { store } from '../store.js';
 import { tgBot } from '../telegram/bot.js';
 import { config } from '../config.js';
-import { downloadToTemp, cleanTemp, sanitizeFileName } from '../utils/media.js';
+import { downloadToTemp, cleanTemp, sanitizeFileName, telegramMediaBatches } from '../utils/media.js';
 import { applyZaloMarkupHtml, formatGroupMsgHtml, formatGroupMsg, groupCaption, topicName, truncate, escapeHtml } from '../utils/format.js';
 import type { ZaloStyle } from '../utils/format.js';
 import { msgStore, userCache, pollStore, sentMsgStore, zaloAlbumStore, reactionEchoStore, reactionSummaryStore, reactionEventDedupeStore, aliasCache, friendsCache, recentlyRecalledMsgIds, type ZaloQuoteData } from '../store.js';
@@ -968,15 +968,30 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
                   ? `${groupCaption(buf.senderName)}\n${escapeHtml(buf.caption)}`
                   : groupCaption(buf.senderName);
                 // Telegram limits media groups to 10 items — split into batches
-                const BATCH = 10;
                 const allSentMsgs: { message_id: number }[] = [];
-                for (let i = 0; i < localPaths.length; i += BATCH) {
-                  const batch = localPaths.slice(i, i + BATCH);
+                const batches = telegramMediaBatches(localPaths, 10);
+                for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+                  const batch = batches[batchIndex]!;
+                  const isFirstBatch = batchIndex === 0;
+                  if (batch.length === 1) {
+                    const sent = await tg.sendPhoto(
+                      config.telegram.groupId,
+                      telegramMediaFile(batch[0]!),
+                      {
+                        ...buf.tgBase,
+                        ...(isFirstBatch && captionText
+                          ? { caption: captionText, parse_mode: 'HTML' as const }
+                          : {}),
+                      },
+                    );
+                    allSentMsgs.push(sent);
+                    continue;
+                  }
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   const mediaItems: any[] = batch.map((lp, j) => ({
                     type: 'photo',
                     media: telegramMediaFile(lp),
-                    ...(i === 0 && j === 0 && captionText ? { caption: captionText, parse_mode: 'HTML' } : {}),
+                    ...(isFirstBatch && j === 0 && captionText ? { caption: captionText, parse_mode: 'HTML' } : {}),
                   }));
                   const sentMsgs = await tg.sendMediaGroup(
                     config.telegram.groupId,

@@ -40,8 +40,8 @@ export async function downloadToTemp(url: string, fileName?: string, retries = 3
     const baseName = sanitizeFileName(fileName ?? path.basename(srcPath));
     const destPath = path.join(TMP_DIR, `${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${baseName}`);
     copyFileSync(srcPath, destPath);
-    // Delete the original from local server's data dir — it's been delivered, no longer needed
-    await unlink(srcPath).catch(() => undefined);
+    // The source belongs to telegram-bot-api's cache. Never delete it here;
+    // cleanTemp() only removes the bridge-owned destination copy.
     return destPath;
   }
 
@@ -92,6 +92,18 @@ export async function downloadToTemp(url: string, fileName?: string, retries = 3
 /** Remove a temp file, ignoring errors. */
 export async function cleanTemp(filePath: string): Promise<void> {
   try { await unlink(filePath); } catch { /* ignore */ }
+}
+
+/** Split Telegram album payloads without ever producing an invalid >10 batch. */
+export function telegramMediaBatches<T>(items: T[], maxBatchSize = 10): T[][] {
+  if (!Number.isInteger(maxBatchSize) || maxBatchSize < 2) {
+    throw new Error('maxBatchSize must be an integer >= 2');
+  }
+  const batches: T[][] = [];
+  for (let i = 0; i < items.length; i += maxBatchSize) {
+    batches.push(items.slice(i, i + maxBatchSize));
+  }
+  return batches;
 }
 
 /**

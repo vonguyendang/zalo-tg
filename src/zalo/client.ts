@@ -7,6 +7,7 @@ import { imageSizeFromFile } from 'image-size/fromFile';
 import qrcode from 'qrcode-terminal';
 import { config } from '../config.js';
 import type { ZaloAPI } from './types.js';
+import { terminal } from '../utils/terminal.js';
 
 // Use os.tmpdir() so it works on Windows (e.g. C:\Users\...\AppData\Local\Temp)
 // as well as macOS/Linux (/tmp or /var/folders/...).
@@ -104,12 +105,8 @@ async function runQRLogin(
             // Print to terminal
             await new Promise<void>((res) => {
               qrcode.generate(code, { small: true }, (qrStr) => {
-                console.clear();
-                console.log('┌─────────────────────────────────────────┐');
-                console.log('│      Quét QR bằng ứng dụng Zalo         │');
-                console.log('└─────────────────────────────────────────┘\n');
+                terminal.qr(QR_IMAGE_PATH);
                 console.log(qrStr);
-                console.log(`(Ảnh QR: ${QR_IMAGE_PATH})\n`);
                 res();
               });
             });
@@ -141,7 +138,7 @@ async function runQRLogin(
 
       case LoginQRCallbackEventType.QRCodeScanned: {
         const name = event.data.display_name;
-        console.log(`\n[Zalo] ✓ Đã quét! Chờ xác nhận từ "${name}"...`);
+        terminal.status('zalo login', `QR scanned by "${name}"`, 'success');
         void hooks.onScanned?.(name).catch((e: unknown) => console.error(e));
         break;
       }
@@ -176,7 +173,7 @@ async function runQRLogin(
     _activeQRAbort = null;
   }
   if (!api) throw new Error('[Zalo] QR login failed – no API returned.');
-  console.log('\n[Zalo] Đăng nhập thành công ✓');
+  terminal.status('zalo login', 'authenticated successfully', 'success');
   return api as ZaloAPI;
 }
 
@@ -206,9 +203,9 @@ export async function getZaloApi(): Promise<ZaloAPI> {
     readFileSync(config.zalo.credentialsPath, 'utf8'),
   ) as { imei: string; cookie: unknown; userAgent: string };
 
-  console.log('[Zalo] Đang đăng nhập bằng credentials đã lưu...');
+  terminal.status('zalo login', 'loading saved credentials…', 'info');
   _api = (await zalo.login(credentials as Parameters<typeof zalo.login>[0])) as ZaloAPI;
-  console.log('[Zalo] Đăng nhập thành công ✓');
+  terminal.status('zalo login', 'saved session authenticated', 'success');
 
   return _api as ZaloAPI;
 }

@@ -49,6 +49,7 @@ import { cancelActiveQRLogin, triggerQRLogin } from '../zalo/client.js';
 import { cancelActiveAppLogin, triggerAppLogin } from '../zalo/loginApp.js';
 import { invalidateAppSession, appGetReceivedFriendRequests, appGetSentFriendRequests, appGetGroupInfo, appGetGroupMembersInfo } from '../zalo/appApi.js';
 import { escapeHtml } from '../utils/format.js';
+import { requestShutdown } from '../lifecycle.js';
 
 // Bridge start time (module load = process start)
 const _bridgeStartTime = Date.now();
@@ -253,6 +254,11 @@ async function isTelegramGroupAdmin(userId: number): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function hasRestartSupervisor(): boolean {
+  return process.env.ZALO_TG_RUNNER === '1'
+    || process.execArgv.some(arg => arg.includes('tsx'));
 }
 
 /** Track in-progress QR login so we don't stack multiple flows. */
@@ -490,6 +496,13 @@ export function setupTelegramHandler(
     const replyOpts = threadId ? { message_thread_id: threadId } : {};
     if (!await isTelegramGroupAdmin(ctx.from.id)) {
       await ctx.reply('⛔ Chỉ admin Telegram mới có thể khởi động lại bridge.', replyOpts);
+      return;
+    }
+    if (!hasRestartSupervisor()) {
+      await ctx.reply(
+        '⚠️ Không có process supervisor. Hãy chạy bridge bằng <code>./run.sh</code> rồi thử lại; nếu tiếp tục, lệnh này sẽ chỉ tắt bot.',
+        { ...replyOpts, parse_mode: 'HTML' },
+      );
       return;
     }
     await ctx.reply(
@@ -1004,7 +1017,7 @@ export function setupTelegramHandler(
 
         await ctx.telegram.sendMessage(
           config.telegram.groupId,
-          `🔍 Tìm thấy theo username <b>${query}</b>:
+          `🔍 Tìm thấy theo username <b>${escapeHtml(query)}</b>:
 ✅ = đã có topic • Nhấn để mở nếu đã map, hoặc tạo nếu chưa có`,
           {
             ...replyOpts,
@@ -1581,9 +1594,13 @@ export function setupTelegramHandler(
         return;
       }
       if (action === 'confirm') {
+        if (!hasRestartSupervisor()) {
+          await ctx.answerCbQuery('Không có process supervisor.', { show_alert: true });
+          return;
+        }
         await ctx.answerCbQuery('Đang khởi động lại…');
         await ctx.editMessageText('🔄 Bridge đang khởi động lại…').catch(() => undefined);
-        setTimeout(() => process.exit(43), 500);
+        setTimeout(() => { void requestShutdown('Restart requested from Telegram', 43); }, 500);
         return;
       }
     }

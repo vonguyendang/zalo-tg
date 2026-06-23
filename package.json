@@ -4,10 +4,11 @@
   "description": "Zalo ↔ Telegram bridge using Forum Topics",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "NODE_OPTIONS=--disable-warning=DEP0205 tsx src/index.ts",
+    "dev:watch": "NODE_OPTIONS=--disable-warning=DEP0205 node --watch --import tsx src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
-    "test": "tsx --test tests/**/*.test.ts"
+    "start": "node --disable-warning=DEP0205 dist/index.js",
+    "test": "NODE_OPTIONS=--disable-warning=DEP0205 tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
     "@types/qrcode": "^1.5.6",

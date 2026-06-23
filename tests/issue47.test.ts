@@ -27,6 +27,23 @@ test('keeps global contact name separate from group-scoped display names', async
   assert.equal(userCache.getNameInGroup('u47', 'gB'), 'Tên trong nhóm B');
 });
 
+test('keeps echo suppression active until every concurrent send finishes', async () => {
+  const { sentMsgStore } = await import('../src/store.js');
+  sentMsgStore.markSending('concurrent-thread');
+  sentMsgStore.markSending('concurrent-thread');
+  sentMsgStore.unmarkSending('concurrent-thread');
+  assert.equal(sentMsgStore.isSendingTo('concurrent-thread'), true);
+  sentMsgStore.unmarkSending('concurrent-thread');
+  assert.equal(sentMsgStore.isSendingTo('concurrent-thread'), false);
+});
+
+test('keeps a trailing single photo out of sendMediaGroup', async () => {
+  const { telegramMediaBatches } = await import('../src/utils/media.js');
+  const batches = telegramMediaBatches(Array.from({ length: 11 }, (_, i) => i + 1));
+  assert.deepEqual(batches.map(batch => batch.length), [10, 1]);
+  assert.deepEqual(telegramMediaBatches(['only-one']), [['only-one']]);
+});
+
 test('groups Zalo photos even when every childnumber is zero and preserves order', async () => {
   const { zaloAlbumStore } = await import('../src/store.js');
   const flushed: Array<{ items: Array<{ url: string; msgIds: string[] }> }> = [];

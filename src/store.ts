@@ -429,7 +429,6 @@ function _loadUserCache(): void {
     for (const [gid, members] of Object.entries(raw.gn ?? {})) {
       _groupUidToName.set(gid, new Map(Object.entries(members)));
     }
-    console.log(`[userCache] Loaded ${_uidToName.size} users from disk`);
   } catch (e) {
     console.warn('[userCache] Failed to load cache:', e);
   }
@@ -708,7 +707,7 @@ const _sentKeyOrder: number[] = [];
 const SENT_MAP_MAX = 5000;
 
 /** zaloId values currently being sent by the bot (to handle echo race condition) */
-const _pendingSendConvos = new Map<string, number>(); // zaloId → timestamp
+const _pendingSendConvos = new Map<string, { count: number; markedAt: number }>();
 
 export const sentMsgStore = {
   /** Record a message we sent from TG→Zalo. tgMsgId is the user's TG message. */
@@ -752,25 +751,37 @@ export const sentMsgStore = {
    * back the message before the HTTP response (and sentMsgStore.save) arrives.
    */
   markSending(zaloId: string): void {
-    _pendingSendConvos.set(zaloId, Date.now());
+    const current = _pendingSendConvos.get(zaloId);
+    _pendingSendConvos.set(zaloId, {
+      count: (current?.count ?? 0) + 1,
+      markedAt: Date.now(),
+    });
   },
 
   /** Call AFTER sentMsgStore.save() or on send error. */
   unmarkSending(zaloId: string): void {
-    _pendingSendConvos.delete(zaloId);
+    const current = _pendingSendConvos.get(zaloId);
+    if (!current || current.count <= 1) {
+      _pendingSendConvos.delete(zaloId);
+      return;
+    }
+    _pendingSendConvos.set(zaloId, { ...current, count: current.count - 1 });
   },
 
   /**
    * Returns true if the bot is currently sending to this zaloId.
    * Used to suppress isSelf echo in the Zalo listener.
-   * The echo handler in zalo/handler.ts now skips all isSelf messages
-   * unconditionally, so the primary echo suppression no longer depends
-   * on this window. Reduced from 15s to 5s to minimise false suppression
-   * of genuine messages arriving from other devices.
+   * A long safety expiry prevents a leaked marker from surviving forever;
+   * normal operations remove their reference in finally blocks.
    */
   isSendingTo(zaloId: string): boolean {
-    const ts = _pendingSendConvos.get(zaloId);
-    return ts !== undefined && Date.now() - ts < 5_000;
+    const pending = _pendingSendConvos.get(zaloId);
+    if (!pending) return false;
+    if (Date.now() - pending.markedAt >= 10 * 60_000) {
+      _pendingSendConvos.delete(zaloId);
+      return false;
+    }
+    return pending.count > 0;
   },
 
   stats(): { entries: number } {

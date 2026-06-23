@@ -44,6 +44,7 @@ services:
       - .env
     environment:
       - NODE_ENV=production
+      - ZALO_TG_RUNNER=1
       - DATA_DIR=/app/data
       - ZALO_CREDENTIALS_PATH=/app/data/credentials.json
     volumes:
