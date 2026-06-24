@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import { ThreadType } from 'zca-js';
 import { config } from '../config.js';
@@ -67,6 +67,7 @@ load();
 
 function save(): void {
   try {
+    mkdirSync(path.dirname(FILE), { recursive: true });
     writeFileSync(FILE, JSON.stringify(state, null, 2), 'utf8');
   } catch (err) {
     console.warn('[AutoReply] Failed to save state:', err);

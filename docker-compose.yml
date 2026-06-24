@@ -47,6 +47,12 @@ services:
       - ZALO_TG_RUNNER=1
       - DATA_DIR=/app/data
       - ZALO_CREDENTIALS_PATH=/app/data/credentials.json
+      # Inside Compose, localhost points back to this container. Route Bot API
+      # traffic through the service DNS name instead.
+      - TG_LOCAL_SERVER=http://telegram-bot-api:8081
+    depends_on:
+      telegram-bot-api:
+        condition: service_healthy
     volumes:
       # Persistent data — lưu topics.json + credentials.json
       - ./data:/app/data

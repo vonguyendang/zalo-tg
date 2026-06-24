@@ -7,6 +7,7 @@ import QRCode from 'qrcode';
 
 import type { ZaloAPI, ZaloMessage, ZaloMediaContent, ZaloGroupInfoResponse } from './types.js';
 import { appGetGroupInfo, appGetGroupMembersInfo } from './appApi.js';
+import { extractReactionTargetMsgIds } from './reaction.js';
 import { ZALO_MSG_TYPES } from './types.js';
 import { store } from '../store.js';
 import { tgBot } from '../telegram/bot.js';
@@ -1666,7 +1667,7 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
     }
   };
   _activeMessageHandler = handleZaloMessage;
-  api.listener.on('message', handleZaloMessage);
+  api.listener.on('message', message => { void handleZaloMessage(message as unknown as ZaloMessage); });
 
   // Catch-up stream from zca-js after reconnect.
   // Replays recent messages through the same main handler to refill bridges.
@@ -1696,7 +1697,7 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
     const sorted = [...messages].sort((a, b) => Number(a?.data?.ts ?? 0) - Number(b?.data?.ts ?? 0));
     console.log(`[Zalo→TG] Catch-up old_messages: replay ${sorted.length} item(s)`);
     for (const oldMsg of sorted) {
-      api.listener.emit('message', oldMsg);
+      void handleZaloMessage(oldMsg);
     }
   });
 
@@ -1829,13 +1830,7 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
       // If empty reaction icon → user removed reaction; skip notification
       if (!rIcon) return;
 
-      const rMsgs: Array<{ gMsgID?: string | number; cMsgID?: string | number }> = data?.content?.rMsg ?? [];
-      const targetMsgIds = Array.from(new Set([
-        String(rMsgs[0]?.gMsgID ?? ''),
-        String(rMsgs[0]?.cMsgID ?? ''),
-        String(data?.msgId ?? ''),
-        String(data?.cliMsgId ?? ''),
-      ].map(id => id.trim()).filter(id => id && id !== '0')));
+      const targetMsgIds = extractReactionTargetMsgIds(data);
       if (targetMsgIds.length === 0) return;
 
       const zaloId = String(reaction?.threadId ?? data?.idTo ?? "");

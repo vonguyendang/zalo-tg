@@ -42,11 +42,15 @@ export function loadAppSession(): AppSession | null {
 
 function _reloadAppSession(): AppSession | null {
   const p = path.join(path.dirname(config.zalo.credentialsPath), 'app-session.json');
-  if (!existsSync(p)) return null;
+  if (!existsSync(p)) {
+    _session = null;
+    return null;
+  }
   try {
     _session = JSON.parse(readFileSync(p, 'utf8')) as AppSession;
     return _session;
   } catch {
+    _session = null;
     return null;
   }
 }

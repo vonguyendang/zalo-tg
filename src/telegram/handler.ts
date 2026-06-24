@@ -1,4 +1,4 @@
-import { Reactions, ThreadType, type AttachmentSource } from 'zca-js';
+import { Reactions, ThreadType, type AttachmentSource, type SendMessageQuote } from 'zca-js';
 import type { Context } from 'telegraf';
 import path from 'path';
 import { createReadStream } from 'fs';
@@ -257,6 +257,13 @@ async function isTelegramGroupAdmin(userId: number): Promise<boolean> {
   }
 }
 
+async function requireTelegramOperator(ctx: Context, action: string): Promise<boolean> {
+  const userId = ctx.from?.id;
+  if (userId !== undefined && await isTelegramGroupAdmin(userId)) return true;
+  await ctx.reply(`⛔ Chỉ admin Telegram mới có thể ${action}.`).catch(() => undefined);
+  return false;
+}
+
 function hasRestartSupervisor(): boolean {
   return process.env.ZALO_TG_RUNNER === '1'
     || process.execArgv.some(arg => arg.includes('tsx'));
@@ -409,6 +416,7 @@ export function setupTelegramHandler(
       console.log(`[/login] Bỏ qua từ chat ${ctx.chat.id} (không phải group ${config.telegram.groupId} hoặc DM)`);
       return;
     }
+    if (!await requireTelegramOperator(ctx, 'đăng nhập lại Zalo')) return;
     const threadId = isFromGroup ? ctx.message.message_thread_id : undefined;
     void handleLoginCommand(ctx.chat.id, threadId, ctx.from.id, (newApi) => {
       currentApi = newApi;
@@ -421,6 +429,7 @@ export function setupTelegramHandler(
     const isPrivate   = ctx.chat.type === 'private';
     const isFromGroup = ctx.chat.id === config.telegram.groupId;
     if (!isPrivate && !isFromGroup) return;
+    if (!await requireTelegramOperator(ctx, 'đăng nhập lại Zalo')) return;
     const threadId = isFromGroup ? ctx.message.message_thread_id : undefined;
     void handleLoginCommand(ctx.chat.id, threadId, ctx.from.id, (newApi) => {
       currentApi = newApi;
@@ -434,6 +443,7 @@ export function setupTelegramHandler(
     const isPrivate   = ctx.chat.type === 'private';
     const isFromGroup = ctx.chat.id === config.telegram.groupId;
     if (!isPrivate && !isFromGroup) return;
+    if (!await requireTelegramOperator(ctx, 'đăng nhập lại Zalo')) return;
     const chatId   = ctx.chat.id;
     const threadId = isFromGroup ? ctx.message.message_thread_id : undefined;
     const msgOpts  = threadId ? { message_thread_id: threadId } : {};
@@ -826,6 +836,7 @@ export function setupTelegramHandler(
   // /autoreply on <message> | off | status — bridge-level offline auto-reply (DMs only).
   tgBot.command('autoreply', async (ctx) => {
     if (ctx.chat.id !== config.telegram.groupId) return;
+    if (!await requireTelegramOperator(ctx, 'thay đổi auto-reply')) return;
     const topicId = 'message_thread_id' in ctx.message
       ? (ctx.message.message_thread_id as number | undefined)
       : undefined;
@@ -1513,7 +1524,11 @@ export function setupTelegramHandler(
 
   // ── /seed — show backup decryption seed ──────────────────────────────────
   tgBot.command('seed', async (ctx) => {
-    if (ctx.chat.id !== config.telegram.groupId) return;
+    if (ctx.chat.type !== 'private') {
+      await ctx.reply('🔒 Hãy gửi <code>/seed</code> trong tin nhắn riêng với bot để tránh lộ khoá.', { parse_mode: 'HTML' });
+      return;
+    }
+    if (!await requireTelegramOperator(ctx, 'xem khoá giải mã backup')) return;
     const replyOpts = ctx.message.message_thread_id
       ? { message_thread_id: ctx.message.message_thread_id }
       : {};
@@ -1537,6 +1552,7 @@ export function setupTelegramHandler(
   // ── /update — manual update check ────────────────────────────────────────
   tgBot.command('update', async (ctx) => {
     if (ctx.chat.id !== config.telegram.groupId) return;
+    if (!await requireTelegramOperator(ctx, 'cập nhật bridge')) return;
     const { triggerUpdateCheck } = await import('../updater.js');
     const found = await triggerUpdateCheck(ctx.telegram);
     if (!found) {
@@ -1551,6 +1567,7 @@ export function setupTelegramHandler(
 
   tgBot.command('admin', async (ctx) => {
     if (ctx.chat.id !== config.telegram.groupId) return;
+    if (!await requireTelegramOperator(ctx, 'mở admin panel')) return;
 
     // /admin lookup — reply to a message to see its mapping
     const text = 'text' in ctx.message ? ctx.message.text ?? '' : '';
@@ -1871,6 +1888,10 @@ export function setupTelegramHandler(
 
     // ── admin: admin panel callbacks ───────────────────────────────────────
     if (data?.startsWith('admin:')) {
+      if (!await isTelegramGroupAdmin(ctx.from.id)) {
+        await ctx.answerCbQuery('⛔ Chỉ admin Telegram mới có thể thao tác.', { show_alert: true });
+        return;
+      }
       const action = data.slice(6);
       if (action === 'close') {
         await ctx.deleteMessage().catch(() => undefined);
@@ -2263,7 +2284,7 @@ export function setupTelegramHandler(
    * Only returns a quote if cliMsgId has been confirmed by the Zalo echo
    * (non-empty, non-"0") — otherwise Zalo rejects with code 114.
    */
-  function getZaloQuote(tgMsgId: number | undefined): ZaloQuoteData | undefined {
+  function getZaloQuote(tgMsgId: number | undefined): SendMessageQuote | undefined {
     if (tgMsgId === undefined) return undefined;
     const fromMsgStore = msgStore.getQuote(tgMsgId);
     if (fromMsgStore) {
@@ -2273,7 +2294,16 @@ export function setupTelegramHandler(
         return undefined;
       }
       console.log(`[TG→Zalo] getZaloQuote: found in msgStore for tgMsgId=${tgMsgId} msgId=${fromMsgStore.msgId} cliMsgId=${fromMsgStore.cliMsgId}`);
-      return fromMsgStore;
+      return {
+        content: fromMsgStore.content,
+        msgType: fromMsgStore.msgType,
+        propertyExt: undefined,
+        uidFrom: fromMsgStore.uidFrom,
+        msgId: fromMsgStore.msgId,
+        cliMsgId: fromMsgStore.cliMsgId,
+        ts: fromMsgStore.ts,
+        ttl: fromMsgStore.ttl,
+      };
     }
     console.log(`[TG→Zalo] getZaloQuote: no quote found for tgMsgId=${tgMsgId}`);
     return undefined;
@@ -2885,11 +2915,10 @@ sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
           const voiceUrl = uploaded[0]?.fileUrl;
           if (!voiceUrl) throw new Error('No fileUrl from uploadAttachment');
           console.log(`[TG→Zalo] Sending voice → ${voiceUrl}`);
-          // Zalo mobile relies heavily on duration metadata for native voice UX.
-          // Keep the value in milliseconds to match zca-js video/voice internals.
-          const voiceDurationMs = Math.max(0, (msg.voice.duration ?? 0) * 1000);
+          // zca-js@2.1.2 accepts only voiceUrl and optional ttl here; passing
+          // Telegram's duration would be ignored by the library at runtime.
           const voiceResult = await api.sendVoice(
-            voiceDurationMs > 0 ? { voiceUrl, duration: voiceDurationMs } : { voiceUrl },
+            { voiceUrl },
             zaloId,
             threadType,
           ) as Record<string, unknown>;

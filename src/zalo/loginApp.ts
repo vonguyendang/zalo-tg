@@ -21,6 +21,7 @@ import { Zalo } from 'zca-js';
 import { imageSizeFromFile } from 'image-size/fromFile';
 import { statSync } from 'node:fs';
 import { config } from '../config.js';
+import { writePrivateJsonFileSync } from '../utils/privateFile.js';
 import type { ZaloAPI } from './types.js';
 import type { QRLoginHooks } from './client.js';
 
@@ -342,13 +343,9 @@ export async function triggerAppLogin(hooks: AppLoginHooks = {}): Promise<ZaloAP
   const cookies = jar.toZcaFormat();
   const credentials = { imei, cookie: cookies, userAgent: PC_UA };
 
-  // Persist so the bridge can auto-login on next restart
-  mkdirSync(path.dirname(config.zalo.credentialsPath), { recursive: true });
-  writeFileSync(
-    config.zalo.credentialsPath,
-    JSON.stringify(credentials, null, 2),
-    'utf8',
-  );
+  // Persist so the bridge can auto-login on next restart. Session files are
+  // authentication material, so keep them owner-readable only where supported.
+  writePrivateJsonFileSync(config.zalo.credentialsPath, credentials);
   console.log(`[AppLogin] Credentials saved → ${config.zalo.credentialsPath}`);
 
   // Save app-session.json with zpw_enk + raw zaloapp.com cookies for direct PC App API calls
@@ -356,11 +353,12 @@ export async function triggerAppLogin(hooks: AppLoginHooks = {}): Promise<ZaloAP
   const dkey   = String(loginData['dkey'] ?? '');
   if (zpwEnk) {
     const appSessionPath = path.join(path.dirname(config.zalo.credentialsPath), 'app-session.json');
-    writeFileSync(
-      appSessionPath,
-      JSON.stringify({ zpw_enk: zpwEnk, dkey: dkey || undefined, imei, cookies: jar.toRawPairs() }, null, 2),
-      'utf8',
-    );
+    writePrivateJsonFileSync(appSessionPath, {
+      zpw_enk: zpwEnk,
+      dkey: dkey || undefined,
+      imei,
+      cookies: jar.toRawPairs(),
+    });
     console.log(`[AppLogin] App session saved → ${appSessionPath}`);
   }
 

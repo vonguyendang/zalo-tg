@@ -15,6 +15,13 @@ const TMP_ROOT = config.telegram.localServer && process.platform !== 'win32'
   : os.tmpdir();
 const TMP_DIR = path.join(TMP_ROOT, 'zalo-tg');
 
+function uniqueTempName(prefix: string, extension: string): string {
+  return path.join(
+    TMP_DIR,
+    `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}${extension}`,
+  );
+}
+
 /** Keep readable Unicode filenames, but remove path/control chars unsafe on disk. */
 export function sanitizeFileName(fileName: string, fallback = `download_${Date.now()}`): string {
   const cleaned = fileName
@@ -32,6 +39,9 @@ export function sanitizeFileName(fileName: string, fallback = `download_${Date.n
  *  In that case we copy the file directly instead of downloading via HTTP.
  */
 export async function downloadToTemp(url: string, fileName?: string, retries = 3): Promise<string> {
+  if (!Number.isInteger(retries) || retries < 1) {
+    throw new Error('retries must be an integer >= 1');
+  }
   mkdirSync(TMP_DIR, { recursive: true });
 
   // Local Bot API server returns file:// paths — copy directly, no HTTP needed
@@ -112,7 +122,7 @@ export function telegramMediaBatches<T>(items: T[], maxBatchSize = 10): T[][] {
  */
 export async function convertToM4a(inputPath: string): Promise<string> {
   mkdirSync(TMP_DIR, { recursive: true });
-  const outputPath = path.join(TMP_DIR, `voice_${Date.now()}.m4a`);
+  const outputPath = uniqueTempName('voice', '.m4a');
   await new Promise<void>((resolve, reject) => {
     const ff = spawn('ffmpeg', [
       '-y', '-i', inputPath,
@@ -134,28 +144,31 @@ export async function convertToM4a(inputPath: string): Promise<string> {
  */
 export async function convertWebmToGif(inputPath: string): Promise<string> {
   mkdirSync(TMP_DIR, { recursive: true });
-  const outputPath = path.join(TMP_DIR, `sticker_${Date.now()}.gif`);
+  const outputPath = uniqueTempName('sticker', '.gif');
   // Two-pass palette for better quality; scale to max 256px wide
-  const palettePass = path.join(TMP_DIR, `palette_${Date.now()}.png`);
-  await new Promise<void>((resolve, reject) => {
-    const ff = spawn('ffmpeg', [
-      '-y', '-i', inputPath,
-      '-vf', 'fps=15,scale=min(256\\,iw):-2:flags=lanczos,palettegen=stats_mode=diff',
-      palettePass,
-    ]);
-    ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg palettegen exit ${code}`)));
-    ff.on('error', reject);
-  });
-  await new Promise<void>((resolve, reject) => {
-    const ff = spawn('ffmpeg', [
-      '-y', '-i', inputPath, '-i', palettePass,
-      '-lavfi', 'fps=15,scale=min(256\\,iw):-2:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5',
-      outputPath,
-    ]);
-    ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg paletteuse exit ${code}`)));
-    ff.on('error', reject);
-  });
-  await unlink(palettePass).catch(() => undefined);
+  const palettePass = uniqueTempName('palette', '.png');
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const ff = spawn('ffmpeg', [
+        '-y', '-i', inputPath,
+        '-vf', 'fps=15,scale=min(256\\,iw):-2:flags=lanczos,palettegen=stats_mode=diff',
+        palettePass,
+      ]);
+      ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg palettegen exit ${code}`)));
+      ff.on('error', reject);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const ff = spawn('ffmpeg', [
+        '-y', '-i', inputPath, '-i', palettePass,
+        '-lavfi', 'fps=15,scale=min(256\\,iw):-2:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5',
+        outputPath,
+      ]);
+      ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg paletteuse exit ${code}`)));
+      ff.on('error', reject);
+    });
+  } finally {
+    await unlink(palettePass).catch(() => undefined);
+  }
   return outputPath;
 }
 
@@ -165,7 +178,7 @@ export async function convertWebmToGif(inputPath: string): Promise<string> {
  */
 export async function extractVideoThumbnail(videoPath: string): Promise<string> {
   mkdirSync(TMP_DIR, { recursive: true });
-  const outputPath = path.join(TMP_DIR, `thumb_${Date.now()}.jpg`);
+  const outputPath = uniqueTempName('thumb', '.jpg');
   await new Promise<void>((resolve, reject) => {
     const ff = spawn('ffmpeg', [
       '-y', '-i', videoPath,
@@ -186,10 +199,13 @@ const VIDEO_EXTS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv']);
 /** Guess media type from filename or URL. */
 export function detectMediaType(fileNameOrUrl: string): 'image' | 'video' | 'document' {
   const lower = fileNameOrUrl.toLowerCase();
-  const ext   = path.extname(lower.split('?')[0] ?? '');
+  // Query strings and fragments are URL metadata, not part of the filename.
+  // Strip both before asking path.extname() so `clip.webm#t=3` is detected.
+  const pathname = lower.split(/[?#]/, 1)[0] ?? '';
+  const ext = path.extname(pathname);
   if (IMAGE_EXTS.has(ext)) return 'image';
   if (VIDEO_EXTS.has(ext)) return 'video';
-  if (/\.(jpg|jpeg|png|gif|webp)(\?|$)/.test(lower)) return 'image';
-  if (/\.(mp4|mov|avi|mkv|webm)(\?|$)/.test(lower))  return 'video';
+  if (/\.(jpg|jpeg|png|gif|webp)(?:[?#]|$)/.test(lower)) return 'image';
+  if (/\.(mp4|mov|avi|mkv|webm)(?:[?#]|$)/.test(lower))  return 'video';
   return 'document';
 }

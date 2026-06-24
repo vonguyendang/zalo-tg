@@ -52,6 +52,7 @@
 - [Project Structure](#-project-structure)
 - [Persistent Data Model](#-persistent-data-model)
 - [Security Model](#-security-model)
+- [Testing and CI](#-testing-and-ci)
 - [Contributors](#-contributors)
 - [License](#-license)
 
@@ -710,6 +711,21 @@ Security considerations:
 - Outbound requests to Telegram and Zalo are transmitted over TLS.
 - The bridge does not intentionally log credentials.
 - The `/recall` command is available to group members and can retract messages sent by the bot. Restrict group membership and bot permissions according to your operational risk model.
+
+
+---
+
+## 🧪 Testing and CI
+
+The repository requires Node.js 20.11 or newer and includes unit/regression tests for configuration, message/reaction mapping, persistence indexes, Unicode/HTML formatting, media helpers, auto-reply guards, Telegram rate limiting, lifecycle shutdown, and sensitive-file permissions.
+
+```bash
+npm run check          # TypeScript build + full test suite
+npm run test:coverage  # Coverage for modules loaded by the tests
+npm run security:audit # Production dependency audit
+```
+
+GitHub Actions runs `npm run check` and the production dependency audit on Node.js 20 and 22. Coverage output only describes modules imported by the tests; it is not a whole-repository coverage guarantee.
 
 ---
 

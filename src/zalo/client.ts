@@ -1,11 +1,12 @@
 import { Zalo, LoginQRCallbackEventType } from 'zca-js';
 import type { LoginQRCallback } from 'zca-js';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { imageSizeFromFile } from 'image-size/fromFile';
 import qrcode from 'qrcode-terminal';
 import { config } from '../config.js';
+import { writePrivateJsonFileSync } from '../utils/privateFile.js';
 import type { ZaloAPI } from './types.js';
 import { terminal } from '../utils/terminal.js';
 
@@ -69,11 +70,11 @@ export interface QRLoginHooks {
 
 function saveCredentials(data: { cookie: unknown; imei: string; userAgent: string }): void {
   try {
-    writeFileSync(
-      config.zalo.credentialsPath,
-      JSON.stringify({ imei: data.imei, cookie: data.cookie, userAgent: data.userAgent }, null, 2),
-      'utf8',
-    );
+    writePrivateJsonFileSync(config.zalo.credentialsPath, {
+      imei: data.imei,
+      cookie: data.cookie,
+      userAgent: data.userAgent,
+    });
     console.log(`[Zalo] Credentials saved → ${config.zalo.credentialsPath}`);
   } catch (err) {
     console.error('[Zalo] Failed to save credentials:', err);

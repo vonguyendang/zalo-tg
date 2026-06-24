@@ -22,6 +22,7 @@ Cầu nối tin nhắn hai chiều giữa **Zalo** và **Telegram**, triển kha
 - [Cấu trúc dự án](#cấu-trúc-dự-án)
 - [File dữ liệu](#file-dữ-liệu)
 - [Bảo mật](#bảo-mật)
+- [Kiểm thử và CI](#kiểm-thử-và-ci)
 
 ---
 
@@ -436,6 +437,21 @@ Zalo đặt `realMsgId = 0` cho những tin nhắn không có ID phụ. Vì `Str
 - Bridge vận hành theo mô hình single-user: group Telegram phải là riêng tư và chỉ giới hạn cho thành viên tin cậy, vì bất kỳ thành viên nào cũng có thể gửi tin nhắn qua bridge.
 - Tất cả request HTTP tới Telegram và Zalo đều dùng TLS. Không có credential nào được ghi vào log.
 - Lệnh `/recall` không bị hạn chế trong group — bất kỳ thành viên nào cũng có thể thu hồi tin nhắn do bot gửi. Hãy hạn chế quyền admin bot hoặc tư cách thành viên group nếu đây là mối lo ngại.
+
+
+---
+
+## Kiểm thử và CI
+
+Dự án yêu cầu Node.js 20.11 trở lên và có test unit/hồi quy cho cấu hình, mapping tin nhắn/reaction, index persistence, Unicode/HTML, media, auto-reply, hàng đợi Telegram, graceful shutdown và quyền truy cập file session.
+
+```bash
+npm run check          # build TypeScript + chạy toàn bộ test
+npm run test:coverage  # coverage của các module được test nạp vào
+npm run security:audit # audit dependency production
+```
+
+GitHub Actions chạy `npm run check` và audit dependency production trên Node.js 20 và 22. Báo cáo coverage chỉ tính các module được import trong test, không phải cam kết coverage cho toàn bộ repository.
 
 ---
 

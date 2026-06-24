@@ -24,7 +24,7 @@ FROM node:20-alpine AS prod-deps
 WORKDIR /app
 COPY package*.json ./
 # Install only production dependencies to minimize final image size
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # Stage 4: Runtime environment
 FROM base AS runner

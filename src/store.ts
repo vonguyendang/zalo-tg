@@ -71,8 +71,26 @@ export const store = {
 
   /** Persist a new topic ↔ Zalo mapping. */
   set(entry: TopicEntry): void {
+    // Keep the two indexes strictly one-to-one. Reusing a Telegram topic for a
+    // different Zalo thread must remove the old reverse lookup, and remapping a
+    // Zalo thread to a new topic must remove the stale topic entry.
+    const previousAtTopic = _data.topics[String(entry.topicId)];
+    if (previousAtTopic) {
+      const previousKey = zaloKey(previousAtTopic.zaloId, previousAtTopic.type);
+      if (previousKey !== zaloKey(entry.zaloId, entry.type)
+        && _data.zaloIndex[previousKey] === entry.topicId) {
+        delete _data.zaloIndex[previousKey];
+      }
+    }
+
+    const key = zaloKey(entry.zaloId, entry.type);
+    const previousTopicId = _data.zaloIndex[key];
+    if (previousTopicId !== undefined && previousTopicId !== entry.topicId) {
+      delete _data.topics[String(previousTopicId)];
+    }
+
     _data.topics[String(entry.topicId)] = entry;
-    _data.zaloIndex[zaloKey(entry.zaloId, entry.type)] = entry.topicId;
+    _data.zaloIndex[key] = entry.topicId;
     persist(_data);
   },
 
@@ -309,12 +327,23 @@ export const msgStore = {
   save(tgMsgId: number, zaloMsgIds: string[], quote: ZaloQuoteData): void {
     // Drop sentinel "0" and empty IDs — they are realMsgId=0 placeholders,
     // nobody ever queries getTgMsgId("0") so storing them is pure waste.
-    const validIds = zaloMsgIds.filter(id => id && id !== '0');
-    while (_msgKeyOrder.length + validIds.length > MSG_CACHE_MAX) _evictOne();
+    const validIds = Array.from(new Set(zaloMsgIds.filter(id => id && id !== '0')));
+    const newIdCount = validIds.reduce((count, id) => count + (_zaloToTg.has(id) ? 0 : 1), 0);
+    while (_msgKeyOrder.length + newIdCount > MSG_CACHE_MAX) _evictOne();
     for (const id of validIds) {
-      if (!_zaloToTg.has(id)) {
+      const previousTgId = _zaloToTg.get(id);
+      if (previousTgId === undefined) {
         _tgRefCount.set(tgMsgId, (_tgRefCount.get(tgMsgId) ?? 0) + 1);
         _msgKeyOrder.push(id);
+      } else if (previousTgId !== tgMsgId) {
+        const previousRemaining = (_tgRefCount.get(previousTgId) ?? 1) - 1;
+        if (previousRemaining <= 0) {
+          _tgRefCount.delete(previousTgId);
+          _tgToQuote.delete(previousTgId);
+        } else {
+          _tgRefCount.set(previousTgId, previousRemaining);
+        }
+        _tgRefCount.set(tgMsgId, (_tgRefCount.get(tgMsgId) ?? 0) + 1);
       }
       _zaloToTg.set(id, tgMsgId);
     }
@@ -485,11 +514,16 @@ export const userCache = {
         // Xoá luôn trong _groupNameToUid để tránh rò rỉ
         for (const [, nameMap] of _groupNameToUid) {
           for (const [norm, uid2] of nameMap) {
-            if (uid2 === firstUid) { nameMap.delete(norm); break; }
+            if (uid2 === firstUid) nameMap.delete(norm);
           }
         }
         for (const [, uidMap] of _groupUidToName) uidMap.delete(firstUid);
       }
+    }
+    const previousName = _uidToName.get(uid);
+    if (previousName && previousName !== displayName) {
+      const previousNorm = _normName(previousName);
+      if (_normToUid.get(previousNorm) === uid) _normToUid.delete(previousNorm);
     }
     _uidToName.set(uid, displayName);
     _normToUid.set(_normName(displayName), uid);
@@ -508,6 +542,11 @@ export const userCache = {
     if (!_uidToName.has(uid)) this.save(uid, displayName);
     let m = _groupNameToUid.get(zaloId);
     if (!m) { m = new Map(); _groupNameToUid.set(zaloId, m); }
+    const previousGroupName = _groupUidToName.get(zaloId)?.get(uid);
+    if (previousGroupName && previousGroupName !== displayName) {
+      const previousNorm = _normName(previousGroupName);
+      if (m.get(previousNorm) === uid) m.delete(previousNorm);
+    }
     m.set(_normName(displayName), uid);
     let names = _groupUidToName.get(zaloId);
     if (!names) { names = new Map(); _groupUidToName.set(zaloId, names); }
@@ -556,6 +595,13 @@ export const aliasCache = {
     for (const { userId, alias, displayName } of items) {
       const name = (alias ?? displayName)?.trim();
       if (name) {
+        const previous = _aliasMap.get(userId);
+        if (previous && previous !== name) {
+          const previousNorm = _normName(previous);
+          if (_aliasNormToUid.get(previousNorm) === userId) {
+            _aliasNormToUid.delete(previousNorm);
+          }
+        }
         _aliasMap.set(userId, name);
         _aliasNormToUid.set(_normName(name), userId);
       }
@@ -603,8 +649,7 @@ function upsertAliasFromFriend(friend: ZaloFriend): void {
   // whenever getAllFriends refreshed.
   const alias = friend.alias?.trim();
   if (!alias) return;
-  _aliasMap.set(friend.userId, alias);
-  _aliasNormToUid.set(_normName(alias), friend.userId);
+  aliasCache.merge([{ userId: friend.userId, alias }]);
 }
 
 const FRIENDS_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -724,6 +769,13 @@ export const sentMsgStore = {
             _sentByZaloId.delete(String(mid));
           }
         }
+      }
+    }
+    const previous = _sentMap.get(tgMsgId);
+    if (previous) {
+      for (const mid of previous.msgIds) {
+        const key = String(mid);
+        if (_sentByZaloId.get(key) === tgMsgId) _sentByZaloId.delete(key);
       }
     }
     _sentMap.set(tgMsgId, info);
@@ -1145,6 +1197,15 @@ _loadPolls();
 
 export const pollStore = {
   save(entry: PollEntry): void {
+    const previous = _pollByZaloId.get(entry.pollId);
+    if (previous) {
+      if (_pollByTgId.get(previous.tgPollMsgId) === previous) {
+        _pollByTgId.delete(previous.tgPollMsgId);
+      }
+      if (_pollByUUID.get(previous.tgPollUUID) === previous) {
+        _pollByUUID.delete(previous.tgPollUUID);
+      }
+    }
     _pollByZaloId.set(entry.pollId, entry);
     _pollByTgId.set(entry.tgPollMsgId, entry);
     _pollByUUID.set(entry.tgPollUUID, entry);
