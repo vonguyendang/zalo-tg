@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { gzipSync } from 'node:zlib';
 
 process.env.TG_TOKEN ||= 'test-token';
 process.env.TG_GROUP_ID ||= '-1001';
@@ -11,6 +12,7 @@ process.env.DATA_DIR ||= path.join(os.tmpdir(), `zalo-tg-media-test-${process.pi
 
 const {
   cleanTemp,
+  convertTgsToGif,
   detectMediaType,
   downloadToTemp,
   downloadToTempFromCandidates,
@@ -76,6 +78,48 @@ test('downloadToTemp copies file URLs into bridge-owned storage', async () => {
   assert.notEqual(copied, src);
   assert.equal(path.basename(copied).includes('/'), false);
   await cleanTemp(copied);
+});
+
+test('downloadToTemp explains an unshared Local Bot API file path', async () => {
+  const missing = pathToFileURL(path.join(os.tmpdir(), `missing-local-bot-${process.pid}.webm`)).toString();
+  await assert.rejects(
+    () => downloadToTemp(missing, 'sticker.webm'),
+    /Local Bot API file is not visible.*same absolute path/,
+  );
+});
+
+test('convertTgsToGif renders every Lottie frame into a transparent GIF', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'zalo-tg-tgs-'));
+  const tgsPath = path.join(dir, 'sticker.tgs');
+  const lottie = {
+    v: '5.7.4', fr: 10, ip: 0, op: 2, w: 32, h: 32, nm: 'test', ddd: 0, assets: [],
+    layers: [{
+      ddd: 0, ind: 1, ty: 4, nm: 'dot', sr: 1,
+      ks: {
+        o: { a: 0, k: 100 }, r: { a: 0, k: 0 }, p: { a: 0, k: [16, 16, 0] },
+        a: { a: 0, k: [0, 0, 0] }, s: { a: 0, k: [100, 100, 100] },
+      },
+      shapes: [{
+        ty: 'gr', nm: 'ellipse',
+        it: [
+          { d: 1, ty: 'el', s: { a: 0, k: [20, 20] }, p: { a: 0, k: [0, 0] } },
+          { ty: 'fl', c: { a: 0, k: [1, 0, 0, 1] }, o: { a: 0, k: 100 }, r: 1 },
+          { ty: 'tr', p: { a: 0, k: [0, 0] }, a: { a: 0, k: [0, 0] }, s: { a: 0, k: [100, 100] }, r: { a: 0, k: 0 }, o: { a: 0, k: 100 }, sk: { a: 0, k: 0 }, sa: { a: 0, k: 0 } },
+        ],
+      }],
+      ip: 0, op: 2, st: 0, bm: 0,
+    }],
+  };
+  await writeFile(tgsPath, gzipSync(JSON.stringify(lottie)));
+  const gifPath = await convertTgsToGif(tgsPath);
+  const gif = await readFile(gifPath);
+  assert.equal(gif.subarray(0, 6).toString('ascii'), 'GIF89a');
+  assert.deepEqual(await import('image-size/fromFile').then(m => m.imageSizeFromFile(gifPath)), {
+    height: 32,
+    width: 32,
+    type: 'gif',
+  });
+  await cleanTemp(gifPath);
 });
 
 test('downloadToTemp rejects nonsensical retry counts before I/O', async () => {

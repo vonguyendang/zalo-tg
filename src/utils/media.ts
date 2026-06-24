@@ -1,8 +1,9 @@
 import axios from 'axios';
 import { createWriteStream, mkdirSync, copyFileSync } from 'fs';
-import { stat, unlink } from 'fs/promises';
+import { readFile, stat, unlink, writeFile } from 'fs/promises';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
+import { gunzipSync } from 'zlib';
 import path from 'path';
 import os from 'os';
 import { imageSizeFromFile } from 'image-size/fromFile';
@@ -50,7 +51,21 @@ export async function downloadToTemp(url: string, fileName?: string, retries = 3
     const srcPath = fileURLToPath(url);
     const baseName = sanitizeFileName(fileName ?? path.basename(srcPath));
     const destPath = path.join(TMP_DIR, `${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${baseName}`);
-    copyFileSync(srcPath, destPath);
+    try {
+      copyFileSync(srcPath, destPath);
+    } catch (err) {
+      const code = err && typeof err === 'object' && 'code' in err
+        ? String((err as { code?: unknown }).code)
+        : '';
+      if (code === 'ENOENT') {
+        throw new Error(
+          `Local Bot API file is not visible to the bridge: ${srcPath}. `
+          + 'Mount TELEGRAM_WORK_DIR at the same absolute path in both processes.',
+          { cause: err },
+        );
+      }
+      throw err;
+    }
     // The source belongs to telegram-bot-api's cache. Never delete it here;
     // cleanTemp() only removes the bridge-owned destination copy.
     return destPath;
@@ -254,13 +269,14 @@ export async function convertToM4a(inputPath: string): Promise<string> {
 export async function convertWebmToGif(inputPath: string): Promise<string> {
   mkdirSync(TMP_DIR, { recursive: true });
   const outputPath = uniqueTempName('sticker', '.gif');
-  // Two-pass palette for better quality; scale to max 256px wide
+  // Two-pass palette preserves the original frame rate, Telegram's full
+  // 512px sticker resolution and transparent pixels.
   const palettePass = uniqueTempName('palette', '.png');
   try {
     await new Promise<void>((resolve, reject) => {
       const ff = spawn('ffmpeg', [
         '-y', '-i', inputPath,
-        '-vf', 'fps=15,scale=min(256\\,iw):-2:flags=lanczos,palettegen=stats_mode=diff',
+        '-vf', 'scale=min(512\\,iw):-2:flags=lanczos,format=rgba,palettegen=stats_mode=diff:reserve_transparent=1',
         palettePass,
       ]);
       ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg palettegen exit ${code}`)));
@@ -269,7 +285,7 @@ export async function convertWebmToGif(inputPath: string): Promise<string> {
     await new Promise<void>((resolve, reject) => {
       const ff = spawn('ffmpeg', [
         '-y', '-i', inputPath, '-i', palettePass,
-        '-lavfi', 'fps=15,scale=min(256\\,iw):-2:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5',
+        '-lavfi', 'scale=min(512\\,iw):-2:flags=lanczos,format=rgba[x];[x][1:v]paletteuse=dither=sierra2_4a:alpha_threshold=128',
         outputPath,
       ]);
       ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg paletteuse exit ${code}`)));
@@ -279,6 +295,66 @@ export async function convertWebmToGif(inputPath: string): Promise<string> {
     await unlink(palettePass).catch(() => undefined);
   }
   return outputPath;
+}
+
+/** Convert a Telegram static WebP sticker to a lossless transparent PNG. */
+export async function convertStickerToPng(inputPath: string): Promise<string> {
+  mkdirSync(TMP_DIR, { recursive: true });
+  const { createCanvas, loadImage } = await import('@napi-rs/canvas');
+  const image = await loadImage(inputPath);
+  if (!image.width || !image.height) throw new Error('Cannot read static sticker dimensions');
+  const canvas = createCanvas(image.width, image.height);
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, image.width, image.height);
+  ctx.drawImage(image, 0, 0, image.width, image.height);
+  const outputPath = uniqueTempName('telegram_sticker', '.png');
+  await writeFile(outputPath, canvas.toBuffer('image/png'));
+  return outputPath;
+}
+
+/** Render Telegram's gzip-compressed Lottie/TGS sticker to a transparent GIF. */
+export async function convertTgsToGif(inputPath: string): Promise<string> {
+  mkdirSync(TMP_DIR, { recursive: true });
+  const compressed = await readFile(inputPath);
+  let animationData: Buffer;
+  try {
+    animationData = gunzipSync(compressed);
+  } catch {
+    // Accept plain Lottie JSON too, which makes the converter easier to test
+    // and supports clients that already decompressed the TGS payload.
+    animationData = compressed;
+  }
+
+  const { createCanvas, GifDisposal, GifEncoder, LottieAnimation } = await import('@napi-rs/canvas');
+  const animation = LottieAnimation.loadFromData(animationData);
+  const width = Math.round(animation.width);
+  const height = Math.round(animation.height);
+  const frameCount = Math.max(1, Math.round(animation.frames));
+  const fps = Number.isFinite(animation.fps) && animation.fps > 0 ? animation.fps : 30;
+  if (width < 1 || height < 1) throw new Error('TGS animation has invalid dimensions');
+  if (frameCount > 600) throw new Error(`TGS animation has too many frames: ${frameCount}`);
+
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  const encoder = new GifEncoder(width, height, { repeat: 0, quality: 5 });
+  const delay = Math.max(20, Math.round(1_000 / fps));
+  try {
+    for (let frame = 0; frame < frameCount; frame++) {
+      ctx.clearRect(0, 0, width, height);
+      animation.seekFrame(frame);
+      animation.render(ctx);
+      const rgba = ctx.getImageData(0, 0, width, height).data;
+      encoder.addFrame(new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength), width, height, {
+        delay,
+        disposal: GifDisposal.Background,
+      });
+    }
+    const outputPath = uniqueTempName('telegram_sticker', '.gif');
+    await writeFile(outputPath, encoder.finish());
+    return outputPath;
+  } finally {
+    encoder.dispose();
+  }
 }
 
 /**

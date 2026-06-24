@@ -5,12 +5,18 @@ import { spawnSync } from 'node:child_process';
 
 const cwd = path.resolve(import.meta.dirname, '..');
 
+const CONFIG_KEYS = [
+  'TG_TOKEN', 'TG_GROUP_ID', 'LOCAL_BOT_API', 'TG_LOCAL_SERVER',
+  'DATA_DIR', 'ZALO_CREDENTIALS_PATH', 'ZALO_SKIP_MUTED_GROUPS', 'ZALO_MUTE_SILENT',
+] as const;
+
 function runConfig(overrides: Record<string, string | undefined>) {
   const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const key of [
-    'TG_TOKEN', 'TG_GROUP_ID', 'LOCAL_BOT_API', 'TG_LOCAL_SERVER',
-    'DATA_DIR', 'ZALO_CREDENTIALS_PATH', 'ZALO_SKIP_MUTED_GROUPS', 'ZALO_MUTE_SILENT',
-  ]) delete env[key];
+  for (const key of CONFIG_KEYS) delete env[key];
+  // Set unprovided keys to empty string so dotenv doesn't fill them from .env
+  for (const key of CONFIG_KEYS) {
+    if (!(key in overrides)) env[key] = '';
+  }
   Object.assign(env, overrides);
   const script = `
     import('./src/config.ts')

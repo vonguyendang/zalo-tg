@@ -27,11 +27,16 @@ services:
       # Without TELEGRAM_LOCAL it silently starts in normal mode and rejects
       # every file:// upload from the bridge with HTTP 400.
       TELEGRAM_LOCAL:     "1"
-      TELEGRAM_WORK_DIR:  /data
+      # getFile returns an absolute path under WORK_DIR in local mode. Keep it
+      # under the host-shared /tmp tree so a bridge running either on macOS or
+      # in Compose can read incoming Telegram files directly.
+      TELEGRAM_WORK_DIR:  /tmp/telegram-bot-api
       TELEGRAM_TEMP_DIR:  /tmp
     volumes:
-      - telegram-bot-api-data:/data
       - /tmp:/tmp
+      # Explicit nested bind makes Docker create the work directory before the
+      # image entrypoint tries to chown it on a fresh machine.
+      - /tmp/telegram-bot-api:/tmp/telegram-bot-api
     ports:
       - "${TG_LOCAL_PORT:-8081}:8081"
     restart: unless-stopped
@@ -71,6 +76,3 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
-volumes:
-  telegram-bot-api-data:
