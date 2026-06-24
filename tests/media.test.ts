@@ -14,6 +14,7 @@ const {
   detectMediaType,
   downloadToTemp,
   downloadToTempFromCandidates,
+  getSpriteSheetLayout,
   sanitizeFileName,
   telegramMediaBatches,
 } = await import('../src/utils/media.js');
@@ -40,6 +41,23 @@ test('telegramMediaBatches handles empty, exact and trailing-single batches', ()
 test('telegramMediaBatches rejects invalid Telegram album sizes', () => {
   assert.throws(() => telegramMediaBatches([1], 1), /integer >= 2/);
   assert.throws(() => telegramMediaBatches([1], 2.5), /integer >= 2/);
+});
+
+test('getSpriteSheetLayout resolves Zalo horizontal strips and defensive vertical strips', () => {
+  assert.deepEqual(getSpriteSheetLayout(650, 130, 5), {
+    frames: 5,
+    frameWidth: 130,
+    frameHeight: 130,
+    direction: 'horizontal',
+  });
+  assert.deepEqual(getSpriteSheetLayout(130, 520, 4), {
+    frames: 4,
+    frameWidth: 130,
+    frameHeight: 130,
+    direction: 'vertical',
+  });
+  assert.deepEqual(getSpriteSheetLayout(390, 130, 0).frames, 3);
+  assert.deepEqual(getSpriteSheetLayout(130, 130, 0).frames, 1);
 });
 
 test('detectMediaType handles case, query strings and unknown extensions', () => {

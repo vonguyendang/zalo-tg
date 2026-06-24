@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import os from 'os';
+import { imageSizeFromFile } from 'image-size/fromFile';
 import { config } from '../config.js';
 
 // Local Bot API reads outgoing files from a shared host/container path.
@@ -141,6 +142,87 @@ export function telegramMediaBatches<T>(items: T[], maxBatchSize = 10): T[][] {
     batches.push(items.slice(i, i + maxBatchSize));
   }
   return batches;
+}
+
+export interface SpriteSheetLayout {
+  frames: number;
+  frameWidth: number;
+  frameHeight: number;
+  direction: 'horizontal' | 'vertical';
+}
+
+/** Resolve equally sized frames from a Zalo sticker sprite sheet. */
+export function getSpriteSheetLayout(
+  width: number,
+  height: number,
+  declaredFrames = 0,
+): SpriteSheetLayout {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
+    throw new Error('Sprite dimensions must be positive integers');
+  }
+
+  const requested = Number.isInteger(declaredFrames) && declaredFrames > 1
+    ? declaredFrames
+    : 0;
+  if (requested > 1 && width % requested === 0) {
+    return { frames: requested, frameWidth: width / requested, frameHeight: height, direction: 'horizontal' };
+  }
+  if (requested > 1 && height % requested === 0) {
+    return { frames: requested, frameWidth: width, frameHeight: height / requested, direction: 'vertical' };
+  }
+
+  // Zalo currently serves square frames in one horizontal strip. Keep a
+  // vertical inference as a defensive fallback for older sticker packs.
+  if (width > height && width % height === 0) {
+    return { frames: width / height, frameWidth: height, frameHeight: height, direction: 'horizontal' };
+  }
+  if (height > width && height % width === 0) {
+    return { frames: height / width, frameWidth: width, frameHeight: width, direction: 'vertical' };
+  }
+  return { frames: 1, frameWidth: width, frameHeight: height, direction: 'horizontal' };
+}
+
+/** Convert a Zalo PNG/WebP sprite strip into a Telegram-compatible GIF. */
+export async function convertSpriteSheetToGif(
+  inputPath: string,
+  declaredFrames: number,
+  frameDurationMs: number,
+): Promise<string> {
+  mkdirSync(TMP_DIR, { recursive: true });
+  const dimensions = await imageSizeFromFile(inputPath);
+  if (!dimensions.width || !dimensions.height) throw new Error('Cannot read sticker sprite dimensions');
+  const layout = getSpriteSheetLayout(dimensions.width, dimensions.height, declaredFrames);
+  if (layout.frames < 2) throw new Error('Sticker sprite does not contain multiple frames');
+
+  const duration = Number.isFinite(frameDurationMs)
+    ? Math.min(1_000, Math.max(20, frameDurationMs))
+    : 100;
+  const frameRate = (1_000 / duration).toFixed(6);
+  const position = layout.direction === 'horizontal'
+    ? `x='mod(n\\,${layout.frames})*${layout.frameWidth}':y=0`
+    : `x=0:y='mod(n\\,${layout.frames})*${layout.frameHeight}'`;
+  const crop = `crop=${layout.frameWidth}:${layout.frameHeight}:${position},format=rgba`;
+  const outputPath = uniqueTempName('zalo_sticker', '.gif');
+
+  await new Promise<void>((resolve, reject) => {
+    const ff = spawn('ffmpeg', [
+      '-y',
+      '-loop', '1',
+      '-framerate', frameRate,
+      '-i', inputPath,
+      '-vf', crop,
+      '-frames:v', String(layout.frames),
+      '-loop', '0',
+      outputPath,
+    ]);
+    let stderr = '';
+    ff.stderr?.on('data', chunk => { stderr += String(chunk).slice(-2_000); });
+    ff.on('close', code => code === 0
+      ? resolve()
+      : reject(new Error(`ffmpeg sprite conversion exit ${code}: ${stderr.trim().slice(-500)}`)));
+    ff.on('error', reject);
+  });
+  return outputPath;
 }
 
 /**

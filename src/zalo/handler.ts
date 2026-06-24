@@ -12,7 +12,7 @@ import { ZALO_MSG_TYPES } from './types.js';
 import { store } from '../store.js';
 import { tgBot } from '../telegram/bot.js';
 import { config } from '../config.js';
-import { downloadToTemp, downloadToTempFromCandidates, cleanTemp, sanitizeFileName, telegramMediaBatches } from '../utils/media.js';
+import { downloadToTemp, downloadToTempFromCandidates, cleanTemp, convertSpriteSheetToGif, sanitizeFileName, telegramMediaBatches } from '../utils/media.js';
 import { applyZaloMarkupHtml, formatGroupMsgHtml, formatGroupMsg, groupCaption, topicName, truncate, escapeHtml } from '../utils/format.js';
 import type { ZaloStyle } from '../utils/format.js';
 import { msgStore, userCache, pollStore, sentMsgStore, zaloAlbumStore, reactionEchoStore, reactionSummaryStore, reactionEventDedupeStore, aliasCache, friendsCache, recentlyRecalledMsgIds, type ZaloQuoteData } from '../store.js';
@@ -494,6 +494,15 @@ function telegramErrorCode(err: unknown): number | undefined {
   return typeof response?.error_code === 'number' ? response.error_code : undefined;
 }
 
+function telegramErrorDescription(err: unknown): string {
+  if (!err || typeof err !== 'object') return String(err);
+  if ('response' in err) {
+    const response = (err as { response?: { description?: unknown } }).response;
+    if (typeof response?.description === 'string') return response.description;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
 /**
  * A local Bot API process/container may not share the bridge's /tmp mount. In
  * that case file:// is rejected before Telegram accepts the request. Retrying
@@ -507,10 +516,59 @@ async function withLocalMediaFallback<T>(
   try {
     return await operation(false);
   } catch (err) {
-    if (!config.telegram.localServer || telegramErrorCode(err) !== 400) throw err;
-    console.warn(`[Zalo→TG] ${label}: local file URI rejected; retrying as multipart upload:`, err);
+    const description = telegramErrorDescription(err);
+    const isLocalFileError = telegramErrorCode(err) === 400
+      && /(file:\/\/|http url|url host|wrong file|failed to get.*url|file.*not found|can't open)/i.test(description);
+    if (!config.telegram.localServer || !isLocalFileError) throw err;
+    console.warn(`[Zalo→TG] ${label}: local URI rejected (${description}); retrying multipart`);
     return operation(true);
   }
+}
+
+type TelegramMediaSendOptions = Parameters<typeof tg.sendAnimation>[2];
+
+/** Deliver an animation while preserving a Telegram message for every format. */
+async function sendAnimationWithFallback(
+  localPath: string,
+  options: TelegramMediaSendOptions,
+  fileName: string,
+): Promise<{ message_id: number }> {
+  try {
+    return await withLocalMediaFallback(
+      forceMultipart => tg.sendAnimation(
+        config.telegram.groupId,
+        telegramMediaFile(localPath, forceMultipart),
+        options,
+      ),
+      'Animation upload',
+    );
+  } catch (animationErr) {
+    console.warn('[Zalo→TG] Animation rejected; trying video:', animationErr);
+  }
+
+  try {
+    return await withLocalMediaFallback(
+      forceMultipart => tg.sendVideo(
+        config.telegram.groupId,
+        telegramMediaFile(localPath, forceMultipart),
+        options as Parameters<typeof tg.sendVideo>[2],
+      ),
+      'Animation video fallback',
+    );
+  } catch (videoErr) {
+    console.warn('[Zalo→TG] Animation video rejected; sending as document:', videoErr);
+  }
+
+  return withLocalMediaFallback(
+    forceMultipart => tg.sendDocument(
+      config.telegram.groupId,
+      forceMultipart
+        ? { source: createReadStream(localPath), filename: fileName }
+        : telegramMediaFile(localPath, false),
+      options as Parameters<typeof tg.sendDocument>[2],
+    ),
+    'Animation document fallback',
+  );
 }
 
 // ── Poll helpers ─────────────────────────────────────────────────────────────
@@ -1126,21 +1184,21 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
 
 
       if (msgType === ZALO_MSG_TYPES.GIF) {
-        const url = media.href;
+        const url = media.href || media.thumb;
         if (!url) {
           console.warn('[ZaloHandler] GIF: no URL found in content:', media);
           return;
         }
         const ext = path.extname(url.split('?')[0] ?? '').toLowerCase() || '.mp4';
         const localPath = await (earlyDlPromise ?? downloadToTemp(url, `gif_${Date.now()}${ext}`));
-        const stream = createReadStream(localPath);
         try {
-          const sent = await tg.sendAnimation(
-            config.telegram.groupId,
-            { source: stream },
+          const sent = await sendAnimationWithFallback(
+            localPath,
             tgOpts,
+            `zalo_gif${ext}`,
           );
           saveTgMapping(sent);
+          console.log(`[Zalo→TG] GIF sent: topic=${topicId} msgId=${sent.message_id}`);
         } finally { await cleanTemp(localPath); }
         return;
       }
@@ -1196,55 +1254,125 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
 
       // ── 7. Sticker – fetch real URL via getStickersDetail ──────────────────
       if (msgType === ZALO_MSG_TYPES.STICKER) {
-        const stickerId = media.id;
-        if (!stickerId) {
+        const stickerId = Number(media.id);
+        if (!Number.isFinite(stickerId) || stickerId <= 0) {
           console.warn('[ZaloHandler] Sticker: no id in content:', media);
           return;
         }
+
+        const sendPlaceholder = async (reason: string): Promise<void> => {
+          const sent = await tg.sendMessage(
+            config.telegram.groupId,
+            `${groupCaption(bridgeSenderName)}\n🧩 <i>Sticker Zalo #${stickerId}</i>`,
+            { ...tgBase, parse_mode: 'HTML' },
+          );
+          saveTgMapping(sent);
+          console.warn(`[ZaloHandler] Sticker #${stickerId} forwarded as placeholder: ${reason}`);
+        };
+
         try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const details: any[] = await api.getStickersDetail([stickerId]);
-          const detail = details?.[0];
-          // Animated stickers only have stickerSpriteUrl (sprite sheet) — no static webp/url
-          const isAnimated = !detail?.stickerWebpUrl && !detail?.stickerUrl && !!detail?.stickerSpriteUrl;
-          const url: string | undefined =
-            detail?.stickerWebpUrl ?? detail?.stickerUrl ?? detail?.stickerSpriteUrl;
-          if (!url) {
-            console.warn('[ZaloHandler] Sticker: no URL in detail:', detail);
+          let detail: Awaited<ReturnType<typeof api.getStickersDetail>>[number] | undefined =
+            (await api.getStickersDetail(stickerId))[0];
+          const cateId = Number(media.cateId ?? media.catId);
+          if (!detail && Number.isFinite(cateId) && cateId > 0) {
+            // getStickersDetail() swallows individual request failures and can
+            // return []; the category endpoint is a reliable second source.
+            const category = await api.getStickerCategoryDetail(cateId);
+            detail = category.find(item => Number(item.id) === stickerId);
+          }
+
+          if (!detail) {
+            await sendPlaceholder('sticker detail API returned no data');
             return;
           }
-          const ext = path.extname(url.split('?')[0] ?? '').toLowerCase() || '.webp';
+
+          const isAnimated = Boolean(detail.stickerSpriteUrl && Number(detail.totalFrames) > 1);
+          if (isAnimated) {
+            let spritePath: string | undefined;
+            let gifPath: string | undefined;
+            try {
+              spritePath = await downloadToTemp(
+                detail.stickerSpriteUrl,
+                `sticker_sprite_${Date.now()}.png`,
+              );
+              gifPath = await convertSpriteSheetToGif(
+                spritePath,
+                Number(detail.totalFrames),
+                Number(detail.duration),
+              );
+              const sent = await sendAnimationWithFallback(
+                gifPath,
+                {
+                  ...tgBase,
+                  caption: `${groupCaption(bridgeSenderName)} <i>(sticker động)</i>`,
+                  parse_mode: 'HTML',
+                },
+                `zalo_sticker_${stickerId}.gif`,
+              );
+              saveTgMapping(sent);
+              console.log(`[Zalo→TG] Animated sticker sent: stickerId=${stickerId} frames=${detail.totalFrames} msgId=${sent.message_id}`);
+              return;
+            } catch (animatedErr) {
+              console.warn(`[ZaloHandler] Animated sticker #${stickerId} conversion failed; using static frame:`, animatedErr);
+            } finally {
+              if (gifPath) await cleanTemp(gifPath);
+              if (spritePath) await cleanTemp(spritePath);
+            }
+          }
+
+          const url = detail.stickerWebpUrl || detail.stickerUrl || detail.stickerSpriteUrl;
+          if (!url) {
+            await sendPlaceholder('sticker detail has no media URL');
+            return;
+          }
+          const ext = path.extname(new URL(url).pathname).toLowerCase() || '.png';
           const localPath = await downloadToTemp(url, `sticker_${Date.now()}${ext}`);
           try {
             let sent: { message_id: number };
-            if (isAnimated) {
-              // Animated stickers are sprite sheets — send as photo with label
-              const animCaption = `${groupCaption(bridgeSenderName)} <i>(sticker động 🎥)</i>`;
-              const stream = createReadStream(localPath);
-              sent = await tg.sendPhoto(config.telegram.groupId, { source: stream }, {
-                ...tgBase,
-                caption: animCaption,
-                parse_mode: 'HTML',
-              });
-            } else {
-              try {
-                // Try native TG sticker (webp ≤512 KB displays as a proper sticker)
-                const stream = createReadStream(localPath);
-                sent = await tg.sendSticker(
+            try {
+              sent = await withLocalMediaFallback(
+                forceMultipart => tg.sendSticker(
                   config.telegram.groupId,
-                  { source: stream },
+                  telegramMediaFile(localPath, forceMultipart),
                   tgBase as Parameters<typeof tg.sendSticker>[2],
+                ),
+                'Sticker upload',
+              );
+            } catch (stickerErr) {
+              console.warn(`[ZaloHandler] Native sticker #${stickerId} rejected; sending as photo:`, stickerErr);
+              try {
+                sent = await withLocalMediaFallback(
+                  forceMultipart => tg.sendPhoto(
+                    config.telegram.groupId,
+                    telegramMediaFile(localPath, forceMultipart),
+                    tgOpts,
+                  ),
+                  'Sticker photo fallback',
                 );
-              } catch {
-                // Fall back to photo if file is too large or format unsupported
-                const stream = createReadStream(localPath);
-                sent = await tg.sendPhoto(config.telegram.groupId, { source: stream }, tgOpts);
+              } catch (photoErr) {
+                console.warn(`[ZaloHandler] Sticker photo #${stickerId} rejected; sending as document:`, photoErr);
+                sent = await withLocalMediaFallback(
+                  forceMultipart => tg.sendDocument(
+                    config.telegram.groupId,
+                    forceMultipart
+                      ? { source: createReadStream(localPath), filename: `zalo_sticker_${stickerId}${ext}` }
+                      : telegramMediaFile(localPath, false),
+                    tgOpts as Parameters<typeof tg.sendDocument>[2],
+                  ),
+                  'Sticker document fallback',
+                );
               }
             }
             saveTgMapping(sent);
-          } finally { await cleanTemp(localPath); }
+            console.log(`[Zalo→TG] Sticker sent: stickerId=${stickerId} msgId=${sent.message_id}`);
+          } finally {
+            await cleanTemp(localPath);
+          }
         } catch (stickerErr) {
           console.error('[ZaloHandler] Sticker fetch error:', stickerErr);
+          await sendPlaceholder(telegramErrorDescription(stickerErr)).catch(placeholderErr => {
+            console.error('[ZaloHandler] Sticker placeholder failed:', placeholderErr);
+          });
         }
         return;
       }
