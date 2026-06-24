@@ -1071,6 +1071,7 @@ export const mediaGroupStore = {
 
 interface ZaloAlbumItem {
   url:    string;
+  fallbackUrls: string[];
   msgIds: string[];
   zaloQuote: ZaloQuoteData | undefined;
 }
@@ -1095,8 +1096,12 @@ export const zaloAlbumStore = {
     meta: Omit<ZaloAlbumBuffer, 'timer' | 'items' | 'caption'> & { zaloQuote: ZaloQuoteData | undefined },
     onFlush: (buf: Omit<ZaloAlbumBuffer, 'timer'>) => void | Promise<void>,
     _childnumber = 0,
+    fallbackUrls: readonly string[] = [],
   ): void {
     const { zaloQuote, ...bufferMeta } = meta;
+    const uniqueFallbackUrls = Array.from(new Set(
+      fallbackUrls.map(candidate => candidate.trim()).filter(candidate => candidate && candidate !== url),
+    ));
     const flush = (buf: ZaloAlbumBuffer): void => {
       _zaloAlbumBuffers.delete(key);
       void Promise.resolve(onFlush({
@@ -1115,19 +1120,26 @@ export const zaloAlbumStore = {
     const existing = _zaloAlbumBuffers.get(key);
     if (existing) {
       clearTimeout(existing.timer);
-      if (!existing.items.some(i => i.url === url)) {
-        existing.items.push({ url, msgIds: [...msgIds], zaloQuote });
+      const incomingUrls = new Set([url, ...uniqueFallbackUrls]);
+      const duplicateItem = existing.items.find(item =>
+        [item.url, ...item.fallbackUrls].some(candidate => incomingUrls.has(candidate)));
+      if (!duplicateItem) {
+        existing.items.push({ url, fallbackUrls: uniqueFallbackUrls, msgIds: [...msgIds], zaloQuote });
       } else {
         console.log(`[zaloAlbumStore] Skipping duplicate URL in album buffer (key=${key}, items=${existing.items.length})`);
-        const item = existing.items.find(i => i.url === url);
-        if (item) item.msgIds.push(...msgIds);
+        duplicateItem.msgIds.push(...msgIds);
+        duplicateItem.fallbackUrls = Array.from(new Set([
+          ...duplicateItem.fallbackUrls,
+          url,
+          ...uniqueFallbackUrls,
+        ].filter(candidate => candidate !== duplicateItem.url)));
       }
       if (!existing.caption && caption) existing.caption = caption;
       existing.timer = setTimeout(() => flush(existing), FLUSH_DELAY_MS);
     } else {
       const buf: ZaloAlbumBuffer = {
         ...bufferMeta,
-        items: [{ url, msgIds: [...msgIds], zaloQuote }],
+        items: [{ url, fallbackUrls: uniqueFallbackUrls, msgIds: [...msgIds], zaloQuote }],
         caption,
         timer: setTimeout(() => flush(buf), FLUSH_DELAY_MS),
       };

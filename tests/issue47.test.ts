@@ -77,6 +77,38 @@ test('deduplicates a repeated Zalo photo URL but retains all message ids', async
   assert.deepEqual(result?.items[0]?.msgIds, ['m1', 'm2']);
 });
 
+test('keeps fallback CDN URLs when duplicate Zalo photo events are merged', async () => {
+  const { zaloAlbumStore } = await import('../src/store.js');
+  let result: { items: Array<{ url: string; fallbackUrls: string[] }> } | undefined;
+  const meta = {
+    senderName: 'Tester',
+    topicId: 481,
+    tgBase: { message_thread_id: 481 },
+    zaloQuote: undefined,
+  };
+  zaloAlbumStore.add('g:u:fallback', 'hd-url', ['m1'], undefined, meta, buf => { result = buf; }, 0, ['normal-url']);
+  zaloAlbumStore.add('g:u:fallback', 'hd-url', ['m2'], undefined, meta, buf => { result = buf; }, 0, ['thumb-url']);
+  await sleep(750);
+  assert.deepEqual(result?.items[0]?.fallbackUrls, ['normal-url', 'thumb-url']);
+});
+
+test('deduplicates renewed HD URLs when two Zalo events share a normal CDN URL', async () => {
+  const { zaloAlbumStore } = await import('../src/store.js');
+  let result: { items: Array<{ url: string; fallbackUrls: string[]; msgIds: string[] }> } | undefined;
+  const meta = {
+    senderName: 'Tester',
+    topicId: 482,
+    tgBase: { message_thread_id: 482 },
+    zaloQuote: undefined,
+  };
+  zaloAlbumStore.add('g:u:renewed', 'hd-old', ['m1'], undefined, meta, buf => { result = buf; }, 0, ['normal']);
+  zaloAlbumStore.add('g:u:renewed', 'hd-new', ['m2'], undefined, meta, buf => { result = buf; }, 0, ['normal']);
+  await sleep(750);
+  assert.equal(result?.items.length, 1);
+  assert.deepEqual(result?.items[0]?.msgIds, ['m1', 'm2']);
+  assert.deepEqual(result?.items[0]?.fallbackUrls, ['normal', 'hd-new']);
+});
+
 test('waits for delayed Telegram video update before flushing one media group', async () => {
   const { mediaGroupStore } = await import('../src/store.js');
   const batches: Array<Array<{ fileId: string }>> = [];

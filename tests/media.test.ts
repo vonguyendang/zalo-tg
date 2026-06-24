@@ -13,6 +13,7 @@ const {
   cleanTemp,
   detectMediaType,
   downloadToTemp,
+  downloadToTempFromCandidates,
   sanitizeFileName,
   telegramMediaBatches,
 } = await import('../src/utils/media.js');
@@ -62,6 +63,20 @@ test('downloadToTemp copies file URLs into bridge-owned storage', async () => {
 test('downloadToTemp rejects nonsensical retry counts before I/O', async () => {
   await assert.rejects(() => downloadToTemp('https://invalid.example/file', 'x', 0), /retries must be/);
   await assert.rejects(() => downloadToTemp('https://invalid.example/file', 'x', 1.5), /retries must be/);
+});
+
+test('downloadToTempFromCandidates falls back when the preferred URL is unavailable', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'zalo-tg-media-fallback-'));
+  const missing = pathToFileURL(path.join(dir, 'missing.jpg')).toString();
+  const fallback = path.join(dir, 'fallback.jpg');
+  await writeFile(fallback, 'fallback-image', 'utf8');
+
+  const downloaded = await downloadToTempFromCandidates(
+    [missing, pathToFileURL(fallback).toString(), pathToFileURL(fallback).toString()],
+    'photo.jpg',
+  );
+  assert.equal(await readFile(downloaded, 'utf8'), 'fallback-image');
+  await cleanTemp(downloaded);
 });
 
 test('cleanTemp is idempotent for missing paths', async () => {

@@ -22,7 +22,13 @@ services:
     environment:
       TELEGRAM_API_ID:   "${TG_API_ID}"
       TELEGRAM_API_HASH: "${TG_API_HASH}"
-    command: --local --dir=/data --temp-dir=/tmp
+      # aiogram/telegram-bot-api's entrypoint intentionally ignores Docker
+      # `command` arguments and builds its CLI exclusively from these vars.
+      # Without TELEGRAM_LOCAL it silently starts in normal mode and rejects
+      # every file:// upload from the bridge with HTTP 400.
+      TELEGRAM_LOCAL:     "1"
+      TELEGRAM_WORK_DIR:  /data
+      TELEGRAM_TEMP_DIR:  /tmp
     volumes:
       - telegram-bot-api-data:/data
       - /tmp:/tmp
@@ -30,7 +36,9 @@ services:
       - "${TG_LOCAL_PORT:-8081}:8081"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8081/"]
+      # Bot API intentionally returns 404 at `/`; probe the listening socket
+      # instead of treating that valid response as an unhealthy container.
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8081"]
       interval: 10s
       timeout: 5s
       retries: 5

@@ -533,6 +533,43 @@ function streamEvent(event: ActivityEvent, method: ConsoleMethod, rest: unknown[
   );
 }
 
+function formatDashboardValue(value: unknown): string {
+  if (value instanceof AggregateError) {
+    const causes = value.errors
+      .slice(0, 3)
+      .map(formatDashboardValue)
+      .join(' | ');
+    return `${value.name}: ${value.message}${causes ? `; ${causes}` : ''}`;
+  }
+  if (value instanceof Error) {
+    const cause = 'cause' in value && value.cause !== undefined
+      ? `; cause=${formatDashboardValue(value.cause)}`
+      : '';
+    return `${value.name}: ${value.message}${cause}`;
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const response = record.response;
+    if (response && typeof response === 'object') {
+      const apiResponse = response as Record<string, unknown>;
+      const code = apiResponse.error_code ?? apiResponse.status;
+      const description = apiResponse.description ?? apiResponse.statusText;
+      if (code !== undefined || description !== undefined) {
+        return [code, description].filter(part => part !== undefined).join(' · ');
+      }
+    }
+    if (typeof record.message === 'string') return record.message;
+    try { return JSON.stringify(value); } catch { return String(value); }
+  }
+  return String(value);
+}
+
+function dashboardLogMessage(message: string, rest: unknown[]): string {
+  if (!dashboardActive || !canUseDashboard() || rest.length === 0) return message;
+  const details = rest.map(formatDashboardValue).join(' · ').replace(/[\r\n]+/g, ' ↵ ');
+  return details ? `${message} ${details}` : message;
+}
+
 function addEvent(label: string, message: string, tone: Tone, method: ConsoleMethod = 'log', rest: unknown[] = []): void {
   const event: ActivityEvent = { time: clock(), label: label.slice(0, 11), message, tone };
   if (scrollOffset > 0) scrollOffset++;
@@ -546,7 +583,7 @@ function formatTaggedLog(method: ConsoleMethod, args: unknown[]): void {
   const first = args[0];
   if (typeof first !== 'string') {
     if (dashboardActive && canUseDashboard()) {
-      addEvent('APP', String(first), method === 'error' ? 'error' : method === 'warn' ? 'warn' : 'muted');
+      addEvent('APP', formatDashboardValue(first), method === 'error' ? 'error' : method === 'warn' ? 'warn' : 'muted');
     } else nativeConsole[method](...args);
     return;
   }
@@ -560,7 +597,9 @@ function formatTaggedLog(method: ConsoleMethod, args: unknown[]): void {
   const rawTag = match[1] ?? 'LOG';
   const label = tagAliases[rawTag.toLowerCase()] ?? rawTag.toUpperCase();
   const tone: Tone = method === 'error' ? 'error' : method === 'warn' ? 'warn' : 'muted';
-  addEvent(label, match[2] ?? '', tone, method, args.slice(1));
+  const rest = args.slice(1);
+  addEvent(label, dashboardLogMessage(match[2] ?? '', rest), tone, method,
+    dashboardActive && canUseDashboard() ? [] : rest);
 }
 
 export const terminal = {

@@ -12,7 +12,7 @@ import { ZALO_MSG_TYPES } from './types.js';
 import { store } from '../store.js';
 import { tgBot } from '../telegram/bot.js';
 import { config } from '../config.js';
-import { downloadToTemp, cleanTemp, sanitizeFileName, telegramMediaBatches } from '../utils/media.js';
+import { downloadToTemp, downloadToTempFromCandidates, cleanTemp, sanitizeFileName, telegramMediaBatches } from '../utils/media.js';
 import { applyZaloMarkupHtml, formatGroupMsgHtml, formatGroupMsg, groupCaption, topicName, truncate, escapeHtml } from '../utils/format.js';
 import type { ZaloStyle } from '../utils/format.js';
 import { msgStore, userCache, pollStore, sentMsgStore, zaloAlbumStore, reactionEchoStore, reactionSummaryStore, reactionEventDedupeStore, aliasCache, friendsCache, recentlyRecalledMsgIds, type ZaloQuoteData } from '../store.js';
@@ -433,24 +433,28 @@ async function _doCreateTopic(
 
   // Pin group avatar as the first message in the topic
   if (type === 1 /* Group */ && avatarUrl) {
+    let localPath: string | undefined;
     try {
-      const localPath = await downloadToTemp(avatarUrl, `avatar_${Date.now()}.jpg`);
-      const stream = createReadStream(localPath);
-      const avatarMsg = await tg.sendPhoto(
-        config.telegram.groupId,
-        { source: stream },
-        {
-          message_thread_id: topicId,
-          caption: `🖼 Ảnh đại diện nhóm <b>${escapeHtml(displayName)}</b>`,
-          parse_mode: 'HTML',
-        },
+      localPath = await downloadToTemp(avatarUrl, `avatar_${Date.now()}.jpg`);
+      const avatarMsg = await withLocalMediaFallback(
+        forceMultipart => tg.sendPhoto(
+          config.telegram.groupId,
+          telegramMediaFile(localPath!, forceMultipart),
+          {
+            message_thread_id: topicId,
+            caption: `🖼 Ảnh đại diện nhóm <b>${escapeHtml(displayName)}</b>`,
+            parse_mode: 'HTML',
+          },
+        ),
+        'Group avatar upload',
       );
-      await cleanTemp(localPath);
       try {
         await tg.pinChatMessage(config.telegram.groupId, avatarMsg.message_id, { disable_notification: true });
       } catch { /* pinning requires admin rights */ }
     } catch (avatarErr) {
       console.warn(`[Zalo→TG] Failed to pin group avatar for ${displayName}:`, avatarErr);
+    } finally {
+      if (localPath) await cleanTemp(localPath);
     }
   }
 
@@ -478,10 +482,35 @@ function parseContent(raw: string | ZaloMediaContent | Record<string, unknown>):
 }
 
 /** Prefer zero-copy file URIs with telegram-bot-api --local. */
-function telegramMediaFile(filePath: string): string | { source: ReturnType<typeof createReadStream> } {
-  return config.telegram.localServer
+function telegramMediaFile(filePath: string, forceMultipart = false): string | { source: ReturnType<typeof createReadStream> } {
+  return config.telegram.localServer && !forceMultipart
     ? pathToFileURL(filePath).toString()
     : { source: createReadStream(filePath) };
+}
+
+function telegramErrorCode(err: unknown): number | undefined {
+  if (!err || typeof err !== 'object' || !('response' in err)) return undefined;
+  const response = (err as { response?: { error_code?: unknown } }).response;
+  return typeof response?.error_code === 'number' ? response.error_code : undefined;
+}
+
+/**
+ * A local Bot API process/container may not share the bridge's /tmp mount. In
+ * that case file:// is rejected before Telegram accepts the request. Retrying
+ * a rejected (HTTP 400) request as multipart is safe and works across that
+ * deployment boundary.
+ */
+async function withLocalMediaFallback<T>(
+  operation: (forceMultipart: boolean) => Promise<T>,
+  label: string,
+): Promise<T> {
+  try {
+    return await operation(false);
+  } catch (err) {
+    if (!config.telegram.localServer || telegramErrorCode(err) !== 400) throw err;
+    console.warn(`[Zalo→TG] ${label}: local file URI rejected; retrying as multipart upload:`, err);
+    return operation(true);
+  }
 }
 
 // ── Poll helpers ─────────────────────────────────────────────────────────────
@@ -935,14 +964,21 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
 
       // ── 2. Photo / Image ───────────────────────────────────────────────────
       if (msgType === ZALO_MSG_TYPES.PHOTO) {
-        // prefer HD from params, fall back to href
-        let url = media.href;
+        // Prefer HD, but retain normal/thumb variants because individual Zalo
+        // CDN URLs can expire independently.
+        let hdUrl: string | undefined;
         if (media.params) {
           try {
             const p = JSON.parse(media.params) as { hd?: string };
-            if (p.hd) url = p.hd;
+            if (p.hd) hdUrl = p.hd;
           } catch { /* ignore */ }
         }
+        const photoUrls = Array.from(new Set(
+          [hdUrl, media.href, media.thumb]
+            .filter((candidate): candidate is string => typeof candidate === 'string' && candidate.trim().length > 0)
+            .map(candidate => candidate.trim()),
+        ));
+        const url = photoUrls[0];
         if (!url) { console.warn('[ZaloHandler] Photo: no URL found in content:', media); return; }
 
         // Caption attached to the photo by the sender (Zalo stores it in the `title` field)
@@ -965,19 +1001,25 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
           async (buf) => {
             if (buf.items.length === 1) {
               // Single photo
-              const singleUrl = buf.items[0]!.url;
-              const localPath = await downloadToTemp(singleUrl, `photo_${Date.now()}.jpg`);
+              const item = buf.items[0]!;
+              const localPath = await downloadToTempFromCandidates(
+                [item.url, ...item.fallbackUrls],
+                `photo_${Date.now()}.jpg`,
+              );
               try {
-                const sent = await tg.sendPhoto(
-                  config.telegram.groupId,
-                  telegramMediaFile(localPath),
-                  {
-                    ...buf.tgBase,
-                    parse_mode: 'HTML' as const,
-                    caption: buf.caption
-                      ? `${groupCaption(buf.senderName)}\n${escapeHtml(buf.caption)}`
-                      : groupCaption(buf.senderName),
-                  },
+                const sent = await withLocalMediaFallback(
+                  forceMultipart => tg.sendPhoto(
+                    config.telegram.groupId,
+                    telegramMediaFile(localPath, forceMultipart),
+                    {
+                      ...buf.tgBase,
+                      parse_mode: 'HTML' as const,
+                      caption: buf.caption
+                        ? `${groupCaption(buf.senderName)}\n${escapeHtml(buf.caption)}`
+                        : groupCaption(buf.senderName),
+                    },
+                  ),
+                  'Photo upload',
                 );
                 // Use buf.zaloQuote which already has the correct cliMsgId and
                 // parsed media content object (not raw JSON string).
@@ -989,7 +1031,10 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
               const localPaths: string[] = [];
               try {
                 const dlPromises = buf.items.map(item =>
-                  downloadToTemp(item.url, `photo_${Date.now()}.jpg`));
+                  downloadToTempFromCandidates(
+                    [item.url, ...item.fallbackUrls],
+                    `photo_${Date.now()}.jpg`,
+                  ));
                 const dlResults = await Promise.allSettled(dlPromises);
                 const downloaded = dlResults.flatMap((r, index) => {
                   if (r.status === 'fulfilled') return [{ localPath: r.value, item: buf.items[index]! }];
@@ -1004,40 +1049,54 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
                 // Telegram limits media groups to 10 items — split into batches
                 const allSentMsgs: { message_id: number }[] = [];
                 const batches = telegramMediaBatches(localPaths, 10);
+                let downloadedOffset = 0;
                 for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
                   const batch = batches[batchIndex]!;
                   const isFirstBatch = batchIndex === 0;
                   if (batch.length === 1) {
-                    const sent = await tg.sendPhoto(
-                      config.telegram.groupId,
-                      telegramMediaFile(batch[0]!),
-                      {
-                        ...buf.tgBase,
-                        ...(isFirstBatch && captionText
-                          ? { caption: captionText, parse_mode: 'HTML' as const }
-                          : {}),
-                      },
+                    const sent = await withLocalMediaFallback(
+                      forceMultipart => tg.sendPhoto(
+                        config.telegram.groupId,
+                        telegramMediaFile(batch[0]!, forceMultipart),
+                        {
+                          ...buf.tgBase,
+                          ...(isFirstBatch && captionText
+                            ? { caption: captionText, parse_mode: 'HTML' as const }
+                            : {}),
+                        },
+                      ),
+                      'Photo upload',
                     );
                     allSentMsgs.push(sent);
-                    continue;
+                  } else {
+                    const sentMsgs = await withLocalMediaFallback(
+                      forceMultipart => {
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        const mediaItems: any[] = batch.map((lp, j) => ({
+                          type: 'photo',
+                          media: telegramMediaFile(lp, forceMultipart),
+                          ...(isFirstBatch && j === 0 && captionText ? { caption: captionText, parse_mode: 'HTML' } : {}),
+                        }));
+                        return tg.sendMediaGroup(
+                          config.telegram.groupId,
+                          mediaItems,
+                          { ...buf.tgBase, message_thread_id: buf.topicId } as Parameters<typeof tg.sendMediaGroup>[2],
+                        );
+                      },
+                      'Photo album upload',
+                    );
+                    allSentMsgs.push(...sentMsgs);
                   }
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  const mediaItems: any[] = batch.map((lp, j) => ({
-                    type: 'photo',
-                    media: telegramMediaFile(lp),
-                    ...(isFirstBatch && j === 0 && captionText ? { caption: captionText, parse_mode: 'HTML' } : {}),
-                  }));
-                  const sentMsgs = await tg.sendMediaGroup(
-                    config.telegram.groupId,
-                    mediaItems,
-                    { ...buf.tgBase, message_thread_id: buf.topicId } as Parameters<typeof tg.sendMediaGroup>[2],
-                  );
-                  allSentMsgs.push(...sentMsgs);
-                }
-                // Save per-photo mapping so replying to each photo quotes the correct Zalo message
-                for (let i = 0; i < allSentMsgs.length && i < downloaded.length; i++) {
-                  const item = downloaded[i]!.item;
-                  msgStore.save(allSentMsgs[i]!.message_id, item.msgIds, item.zaloQuote!);
+
+                  // Persist each successful batch immediately. If a later batch
+                  // fails, replies to the already-delivered photos still map to
+                  // the right Zalo messages.
+                  const sentBatch = allSentMsgs.slice(downloadedOffset);
+                  for (let i = 0; i < sentBatch.length && i < batch.length; i++) {
+                    const item = downloaded[downloadedOffset + i]!.item;
+                    msgStore.save(sentBatch[i]!.message_id, item.msgIds, item.zaloQuote!);
+                  }
+                  downloadedOffset += batch.length;
                 }
                 console.log(`[Zalo→TG] Photo album sent: topic=${buf.topicId} photos=${allSentMsgs.length}`);
               } finally {
@@ -1046,6 +1105,7 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
             }
           },
           childnumber,
+          photoUrls.slice(1),
         );
 
         return;

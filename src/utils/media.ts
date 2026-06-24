@@ -99,6 +99,33 @@ export async function downloadToTemp(url: string, fileName?: string, retries = 3
   throw lastErr;
 }
 
+/**
+ * Download the first working URL in priority order.
+ *
+ * Zalo photo messages can carry an HD URL, a normal URL and a thumbnail. The
+ * CDN does not always keep those variants alive for the same amount of time,
+ * so a dead HD URL must not make the whole message disappear.
+ */
+export async function downloadToTempFromCandidates(
+  urls: readonly string[],
+  fileName?: string,
+  retries = 3,
+): Promise<string> {
+  const candidates = Array.from(new Set(urls.map(url => url.trim()).filter(Boolean)));
+  if (candidates.length === 0) throw new Error('No media URL candidates were provided');
+
+  const errors: unknown[] = [];
+  for (const url of candidates) {
+    try {
+      return await downloadToTemp(url, fileName, retries);
+    } catch (err) {
+      errors.push(err);
+    }
+  }
+
+  throw new AggregateError(errors, `Failed to download media from ${candidates.length} URL candidate(s)`);
+}
+
 /** Remove a temp file, ignoring errors. */
 export async function cleanTemp(filePath: string): Promise<void> {
   try { await unlink(filePath); } catch { /* ignore */ }
