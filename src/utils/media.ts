@@ -5,23 +5,16 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { gunzipSync } from 'zlib';
 import path from 'path';
-import os from 'os';
 import { imageSizeFromFile } from 'image-size/fromFile';
-import { config } from '../config.js';
+import { createSharedTempPath, getSharedTempDir } from './sharedTemp.js';
 
 // Local Bot API reads outgoing files from a shared host/container path.
-// macOS os.tmpdir() points to /var/folders, while our server and Docker setup
-// share /tmp, so keep bridge media there whenever local mode is enabled.
-const TMP_ROOT = config.telegram.localServer && process.platform !== 'win32'
-  ? '/tmp'
-  : os.tmpdir();
-const TMP_DIR = path.join(TMP_ROOT, 'zalo-tg');
+// Use a permission-safe resolver instead of the historical fixed /tmp/zalo-tg
+// directory, which can be left root-owned on Docker bind mounts.
+const TMP_DIR = getSharedTempDir('zalo-tg');
 
 function uniqueTempName(prefix: string, extension: string): string {
-  return path.join(
-    TMP_DIR,
-    `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}${extension}`,
-  );
+  return createSharedTempPath('zalo-tg', prefix, extension);
 }
 
 /** Keep readable Unicode filenames, but remove path/control chars unsafe on disk. */
