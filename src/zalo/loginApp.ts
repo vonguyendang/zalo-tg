@@ -15,13 +15,14 @@
 import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import axios, { type AxiosInstance } from 'axios';
 import { Zalo } from 'zca-js';
 import { imageSizeFromFile } from 'image-size/fromFile';
 import { statSync } from 'node:fs';
 import { config } from '../config.js';
 import { writePrivateJsonFileSync } from '../utils/privateFile.js';
+import { createSharedTempPath, prepareSharedTempFile } from '../utils/sharedTemp.js';
 import type { ZaloAPI } from './types.js';
 import type { QRLoginHooks } from './client.js';
 
@@ -186,12 +187,6 @@ function createSession(jar: CookieJar): AxiosInstance {
 
 // ── QR image ──────────────────────────────────────────────────────────────────
 
-const QR_TMP_ROOT = config.telegram.localServer && process.platform !== 'win32'
-  ? '/tmp'
-  : os.tmpdir();
-const QR_TMP_DIR  = path.join(QR_TMP_ROOT, 'zalo-tg-app');
-mkdirSync(QR_TMP_DIR, { recursive: true });
-const QR_IMG_PATH = path.join(QR_TMP_DIR, 'zalo-app-qr.png');
 let activeAppLoginController: AbortController | null = null;
 
 /** Abort the currently active PC-App QR polling flow, if any. */
@@ -269,19 +264,23 @@ export async function triggerAppLogin(hooks: AppLoginHooks = {}): Promise<ZaloAP
     throw new Error('[AppLogin] No QR data in reqqr response: ' + JSON.stringify(inner));
   }
 
-  // Save QR image (prefer base64 PNG from server, fall back to generated)
+  // Save QR image (prefer base64 PNG from server, fall back to generated).
+  // Use a fresh, writable path per login so stale/root-owned Docker files under
+  // /tmp from older runs cannot break non-root containers with EACCES.
+  const qrImgPath = createSharedTempPath('zalo-tg-app', 'zalo-app-qr', '.png');
   if (base64Qr) {
-    writeFileSync(QR_IMG_PATH, Buffer.from(base64Qr, 'base64'));
+    writeFileSync(qrImgPath, Buffer.from(base64Qr, 'base64'));
   } else {
     // Generate QR PNG from token_id using the qrcode npm package
     const qrcode = await import('qrcode');
-    await qrcode.toFile(QR_IMG_PATH, tokenId, { width: 400, margin: 2 });
+    await qrcode.toFile(qrImgPath, tokenId, { width: 400, margin: 2 });
   }
+  prepareSharedTempFile(qrImgPath);
 
   // Notify hook (e.g. send photo to Telegram)
   // Do not continue polling when Telegram failed to receive the QR. Let the
   // command handler report the error and release its in-progress lock.
-  await hooks.onQRReady?.(QR_IMG_PATH, tokenId);
+  await hooks.onQRReady?.(qrImgPath, tokenId);
   ensureActive();
 
   // ── Step 2: Poll for scan ────────────────────────────────────────────────────
