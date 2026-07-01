@@ -41,8 +41,8 @@ import { store, msgStore, userCache, friendsCache, groupsCache, sentMsgStore, po
 import { tgBot, BOT_COMMANDS, COMMAND_DETAILS } from './bot.js';
 import { config } from '../config.js';
 import { downloadToTemp, cleanTemp, convertToM4a, extractVideoThumbnail, convertWebmToGif } from '../utils/media.js';
-import { triggerQRLogin, getAllZaloApis } from '../zalo/client.js';
-import { triggerAppLogin } from '../zalo/loginApp.js';
+import { triggerQRLogin, getAllZaloApis, cancelActiveQRLogin } from '../zalo/client.js';
+import { triggerAppLogin, cancelActiveAppLogin } from '../zalo/loginApp.js';
 import { invalidateAppSession, appGetReceivedFriendRequests, appGetSentFriendRequests, appGetGroupInfo, appGetGroupMembersInfo, appGetFriendProfilesV2, appRequestVoiceCall, appRequestGroupVoiceCall } from '../zalo/appApi.js';
 import { escapeHtml, topicName } from '../utils/format.js';
 
@@ -295,6 +295,9 @@ async function handleLoginCommand(
             ...msgOpts,
             caption: '📱 Mở ứng dụng <b>Zalo</b> → Cài đặt → Quét mã QR để đăng nhập.',
             parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [[{ text: '❌ Hủy đăng nhập', callback_data: `login_cancel:qr:active` }]]
+            }
           },
         );
       },
@@ -347,6 +350,25 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
 
   /** Exposed setter so index.ts can inject the auto-logged-in API. */
   const setCurrentApi = (api: ZaloAPI) => { currentApi = api; };
+
+  tgBot.action(/^login_cancel:(qr|app):(.+)$/, async (ctx) => {
+    const kind = ctx.match[1];
+    let canceled = false;
+    if (kind === 'qr') {
+      canceled = cancelActiveQRLogin();
+      qrLoginInProgress = false;
+    } else if (kind === 'app') {
+      canceled = cancelActiveAppLogin();
+      appLoginInProgress = false;
+    }
+    
+    if (canceled) {
+      await ctx.editMessageCaption('❌ Đăng nhập đã bị hủy.').catch(() => undefined);
+      await ctx.answerCbQuery('Đã hủy đăng nhập').catch(() => undefined);
+    } else {
+      await ctx.answerCbQuery('Không có phiên đăng nhập nào đang chạy').catch(() => undefined);
+    }
+  });
 
   tgBot.command('login', async (ctx) => {
     const isPrivate   = ctx.chat.type === 'private';
@@ -407,6 +429,9 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
               ...msgOpts,
               caption: '📱 Mở ứng dụng <b>Zalo</b> → Cài đặt → Quét mã QR để đăng nhập.',
               parse_mode: 'HTML',
+              reply_markup: {
+                inline_keyboard: [[{ text: '❌ Hủy đăng nhập', callback_data: `login_cancel:app:active` }]]
+              }
             },
           );
         },
@@ -1398,7 +1423,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       let groupInvites: any;
       
       try {
-        groupInvites = await api.getGroupInviteBoxList({ invPerPage: 100 }) as Promise<any>;
+        groupInvites = await api.getGroupInviteBoxList({ invPerPage: 100 }) as any;
         
         // Use appReqs for the first account only, as it's a singleton session right now.
         if (!hasUsedAppReqs && appSentReqs && Object.keys(appSentReqs).length > 0) {
@@ -2679,7 +2704,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
             const sendResult = await api.sendMessage(
               {
                 msg: chunkText,
-                ...(useQuote ? { quote: useQuote } : {}),
+                ...(useQuote ? { quote: useQuote as any } : {}),
                 ...(chunkMentions.length ? { mentions: chunkMentions } : {}),
               },
               zaloId,
@@ -2799,7 +2824,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
             {
               msg: effectiveCaption,
               attachments: attachmentSource,
-              ...(effectiveCaption.length && zaloQuote ? { quote: zaloQuote } : {}),
+              ...(effectiveCaption.length && zaloQuote ? { quote: zaloQuote as any } : {}),
               ...(captionMentions?.length ? { mentions: captionMentions } : {}),
             },
             zaloId,
@@ -2904,7 +2929,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
               {
                 msg: caption,
                 attachments: localPaths,
-                ...(zaloQuote ? { quote: zaloQuote } : {}),
+                ...(zaloQuote ? { quote: zaloQuote as any } : {}),
                 ...(capMentions?.length ? { mentions: capMentions } : {}),
               },
               meta.zaloId,
@@ -3116,7 +3141,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
           // Keep the value in milliseconds to match zca-js video/voice internals.
           const voiceDurationMs = Math.max(0, (msg.voice.duration ?? 0) * 1000);
           const voiceResult = await api.sendVoice(
-            voiceDurationMs > 0 ? { voiceUrl, duration: voiceDurationMs } : { voiceUrl },
+            (voiceDurationMs > 0 ? { voiceUrl, duration: voiceDurationMs } : { voiceUrl }) as any,
             zaloId,
             threadType,
           ) as Record<string, unknown>;

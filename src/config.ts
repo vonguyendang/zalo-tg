@@ -23,6 +23,22 @@ function envFlag(key: string, defaultValue = false): boolean {
   return ['1', 'true', 'yes', 'on'].includes(raw.trim().toLowerCase());
 }
 
+const groupIdRaw = requireEnv('TG_GROUP_ID');
+const groupId = Number(groupIdRaw);
+if (Number.isNaN(groupId) || groupId > -1000000000000 || !Number.isSafeInteger(groupId)) {
+  console.error(`Missing or invalid TG_GROUP_ID. Must be a negative safe integer for a supergroup (got ${groupIdRaw})`);
+  process.exit(1);
+}
+
+let localServer = null;
+if (envFlag('LOCAL_BOT_API')) {
+  localServer = process.env.TG_LOCAL_SERVER?.replace(/\/+$/, '') || null;
+  if (!localServer || !/^https?:\/\//.test(localServer)) {
+    console.error(`Invalid TG_LOCAL_SERVER for LOCAL_BOT_API mode. Must start with http or https (got ${process.env.TG_LOCAL_SERVER})`);
+    process.exit(1);
+  }
+}
+
 export const config: {
   telegram: {
     token: string;
@@ -33,6 +49,7 @@ export const config: {
   zalo: {
     credentialsDir: string;
     skipMutedGroups: boolean;
+    muteSilentMirror: boolean;
     historySyncCount: number;
     historySyncDelayMs: number;
     historyAutoSync: boolean;
@@ -43,18 +60,14 @@ export const config: {
 } = {
   telegram: {
     token:       requireEnv('TG_TOKEN'),
-    groupId:     Number(requireEnv('TG_GROUP_ID')),
+    groupId,
     proxy:       process.env.TG_PROXY,
-    /** URL của local Bot API server, ví dụ: http://localhost:8081.
-     *  Chỉ dùng khi LOCAL_BOT_API=1 và TG_LOCAL_SERVER được set.
-     *  Nếu không → dùng official api.telegram.org. */
-    localServer: envFlag('LOCAL_BOT_API')
-      ? (process.env.TG_LOCAL_SERVER?.replace(/\/$/, '') || null)
-      : null,
+    localServer,
   },
   zalo: {
     credentialsDir: resolvePath(process.env.ZALO_CREDENTIALS_DIR, 'sessions'),
-    skipMutedGroups: envFlag('ZALO_SKIP_MUTED_GROUPS'),
+    skipMutedGroups: envFlag('ZALO_SKIP_MUTED_GROUPS', false),
+    muteSilentMirror: envFlag('ZALO_MUTE_SILENT', true),
     /** Số tin nhắn lịch sử tối đa mỗi lần sync (0 = tắt). Default: 1000 */
     historySyncCount: Number(process.env.ZALO_HISTORY_SYNC_COUNT ?? '1000'),
     /** Delay (ms) giữa mỗi tin khi sync lịch sử. Default: 3000ms */

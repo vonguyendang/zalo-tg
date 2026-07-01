@@ -93,6 +93,16 @@ function saveCredentials(data: { cookie: unknown; imei: string; userAgent: strin
  * - Calls optional `hooks` so callers (e.g. Telegram handler) can forward
  *   the QR image or status messages elsewhere.
  */
+let _activeQRAbort: (() => void) | null = null;
+
+export function cancelActiveQRLogin(): boolean {
+  const abort = _activeQRAbort;
+  if (!abort) return false;
+  _activeQRAbort = null;
+  abort();
+  return true;
+}
+
 async function runQRLogin(
   zalo: InstanceType<typeof Zalo>,
   hooks: QRLoginHooks = {},
@@ -151,6 +161,7 @@ async function runQRLogin(
       }
 
       case LoginQRCallbackEventType.GotLoginInfo: {
+        _activeQRAbort = null;
         tempCredentials = event.data;
         void hooks.onSuccess?.().catch((e: unknown) => console.error(e));
         break;
@@ -158,7 +169,12 @@ async function runQRLogin(
     }
   };
 
+  _activeQRAbort = () => {
+    _activeQRAbort = null;
+  };
+
   const api = await zalo.loginQR({ qrPath: QR_IMAGE_PATH }, callback);
+  _activeQRAbort = null;
   if (!api) throw new Error('[Zalo] QR login failed – no API returned.');
   
   const uid = api.getOwnId?.();

@@ -53,6 +53,7 @@ let _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 // ── Boot Zalo (also used when /login swaps in a fresh API) ───────────────────
 
 async function pruneLeftGroupTopics(api: Awaited<ReturnType<typeof getZaloApi>>, accountId: string): Promise<void> {
+  if (!api) return;
   try {
     const groups = await api.getAllGroups() as { gridVerMap?: Record<string, string> } | undefined;
     const activeGroupIds = new Set(Object.keys(groups?.gridVerMap ?? {}));

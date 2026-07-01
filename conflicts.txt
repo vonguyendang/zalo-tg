@@ -1,0 +1,362 @@
+=== README.md ===
+34-- Optional: Docker / Docker Compose for the local Bot API setup
+35-
+36:<<<<<<< HEAD
+37-</div>
+38-
+39----
+40-
+41-## 📌 Table of Contents
+42-
+43-- [System Overview](#-system-overview)
+44-- [Architectural Principles](#-architectural-principles)
+45-- [Architecture](#-architecture)
+46-- [Capability Surface](#-capability-surface)
+=== README.vi.md ===
+15-`zalo-tg` biến một Telegram supergroup có bật forum topic thành trung tâm đọc/trả lời Zalo:
+16-
+17:<<<<<<< HEAD
+18-- [Kiến trúc](#kiến-trúc)
+19-- [Tính năng](#tính-năng)
+20-- [Yêu cầu](#yêu-cầu)
+21-- [Cài đặt](#cài-đặt)
+22-- [Quick Start — macOS](#quick-start--macos)
+23-- [Cấu hình](#cấu-hình)
+24-- [Chạy ứng dụng](#chạy-ứng-dụng)
+25-- [Xác thực](#xác-thực)
+26-- [Chuyển tệp lớn](#chuyển-tệp-lớn--20-mb)
+27-- [Lệnh Bot](#lệnh-bot)
+--
+58-```
+59-
+60:<<<<<<< HEAD
+61----
+62-
+63-## Quick Start — macOS
+64-
+65-Thư mục [`quick-start-script/`](quick-start-script/) cung cấp hai script sẵn dùng để khởi chạy bridge trên macOS mà không cần mở Terminal.
+66-
+67-### Cách A — Double-click file `.command`
+68-
+69-Cách đơn giản nhất. Double-click `zalo-bot-onefile.command` để hiện menu điều khiển với 5 lựa chọn: **Bật bot**, **Tắt bot**, **Xem trạng thái**, **Mở log**, **Hướng dẫn**.
+70-
+=== package-lock.json ===
+24-        "@types/adm-zip": "^0.5.8",
+25-        "@types/image-size": "^0.7.0",
+26:<<<<<<< HEAD
+27-        "@types/node": "^20.19.41",
+28-=======
+29-        "@types/node": "^20.14.0",
+30-        "@types/qrcode": "^1.5.6",
+31->>>>>>> origin/main
+32-        "@types/qrcode-terminal": "^0.12.2",
+33-        "tsx": "^4.15.6",
+34-        "typescript": "^5.4.5"
+35-      },
+36-      "engines": {
+--
+771-    },
+772-    "node_modules/@types/node": {
+773:<<<<<<< HEAD
+774-      "version": "20.19.41",
+775-      "resolved": "https://registry.npmjs.org/@types/node/-/node-20.19.41.tgz",
+776-      "integrity": "sha512-ECymXOukMnOoVkC2bb1Vc/w/836DXncOg5m8Xj1RH7xSHZJWNYY6Zh7EH477vcnD5egKNNfy2RpNOmuChhFPgQ==",
+777-=======
+778-      "version": "20.19.40",
+779-      "resolved": "https://registry.npmjs.org/@types/node/-/node-20.19.40.tgz",
+780-      "integrity": "sha512-xxx6M2IpSTnnKcR0cMvIiohkiCx20/oRPtWGbenFygKCGl3zqUzdNjQ/1V4solq1LU+dgv0nQzeGOuqkqZGg0Q==",
+781-      "dev": true,
+782->>>>>>> origin/main
+783-      "license": "MIT",
+=== package.json ===
+8-    "dev:watch": "NODE_OPTIONS=--disable-warning=DEP0205 node --watch --import tsx src/index.ts",
+9-    "build": "tsc",
+10:<<<<<<< HEAD
+11-    "start": "node dist/index.js",
+12-    "test": "vitest run",
+13-    "postinstall": "node scripts/patch-zca.js"
+14-=======
+15-    "start": "node --disable-warning=DEP0205 dist/index.js",
+16-    "test": "NODE_OPTIONS=--disable-warning=DEP0205 tsx --test tests/*.test.ts",
+17-    "check": "npm run build && npm test",
+18-    "test:coverage": "node --disable-warning=DEP0205 --import tsx --test --experimental-test-coverage tests/*.test.ts",
+19-    "security:audit": "npm audit --omit=dev"
+20->>>>>>> origin/main
+--
+35-    "@types/adm-zip": "^0.5.8",
+36-    "@types/image-size": "^0.7.0",
+37:<<<<<<< HEAD
+38-    "@types/node": "^20.19.41",
+39-=======
+40-    "@types/node": "^20.14.0",
+41-    "@types/qrcode": "^1.5.6",
+42->>>>>>> origin/main
+43-    "@types/qrcode-terminal": "^0.12.2",
+44-    "tsx": "^4.15.6",
+45-    "typescript": "^5.4.5"
+46-  },
+47-  "engines": {
+=== run-bot-api.sh ===
+1:<<<<<<< HEAD
+2-#!/bin/sh
+3-mkdir -p /Volumes/MacintoshHD-Data/DATA/code/zalo-tg/data/bot-api
+4-exec telegram-bot-api \
+5-  --api-id=14687465 \
+6-  --api-hash=6c4167325edff7781efa88d63507d5d5 \
+7-  --local \
+8-  --dir=/Volumes/MacintoshHD-Data/DATA/code/zalo-tg/data/bot-api \
+9-  --temp-dir=/tmp \
+10-  --http-port=8081 \
+11-  --verbosity=1
+=== src/config.ts ===
+61-    credentialsPath: resolvePath(process.env.ZALO_CREDENTIALS_PATH, 'credentials.json'),
+62-    skipMutedGroups: envFlag('ZALO_SKIP_MUTED_GROUPS'),
+63:<<<<<<< HEAD
+64-    /** Số tin nhắn lịch sử tối đa mỗi lần sync (0 = tắt). Default: 1000 */
+65-    historySyncCount: Number(process.env.ZALO_HISTORY_SYNC_COUNT ?? '1000'),
+66-    /** Delay (ms) giữa mỗi tin khi sync lịch sử. Default: 3000ms */
+67-    historySyncDelayMs: Number(process.env.ZALO_HISTORY_SYNC_DELAY_MS ?? '3000'),
+68-    /** Tự động sync lịch sử khi tạo topic nhóm mới. Default: false */
+69-    historyAutoSync: envFlag('ZALO_HISTORY_AUTO_SYNC'),
+70-=======
+71-    // Mirror Zalo's "mute notifications" → deliver those threads silently on
+72-    // Telegram (messages still arrive, just no ping). On by default; set
+73-    // ZALO_MUTE_SILENT=0 to always notify.
+=== src/index.ts ===
+7-import { config } from './config.js';
+8-import { startUpdateChecker } from './updater.js';
+9:<<<<<<< HEAD
+10-import { store } from './store.js';
+11-import { syncGroupHistory } from './zalo/historySync.js';
+12-import { readFileSync, writeFileSync, existsSync } from 'fs';
+13-import path from 'path';
+14-
+15-let _errorTopicId: number | null = null;
+16-async function getErrorTopicId(): Promise<number | undefined> {
+17-  if (_errorTopicId !== null) return _errorTopicId;
+18-  const _errorTopicFile = path.resolve(config.dataDir, 'error-topic.txt');
+19-  if (existsSync(_errorTopicFile)) {
+--
+92-        api.listener.requestOldReactions(ThreadType.User);
+93-        api.listener.requestOldReactions(ThreadType.Group);
+94:<<<<<<< HEAD
+95-        console.log('[Boot] Requested catch-up sync after reconnect');
+96-
+97-        // Đồng bộ tin nhắn bị lỡ từ các nhóm (chỉ hỗ trợ group topics)
+98-        void (async () => {
+99-          const groups = store.all().filter(e => e.type === 1);
+100-          if (groups.length === 0) return;
+101-          
+102-          console.log(`[Boot] Bắt đầu đồng bộ tin nhắn lỡ cho ${groups.length} nhóm sau khi kết nối lại...`);
+103-          let totalSynced = 0;
+104-          for (const g of groups) {
+--
+245-  ]).catch(() => undefined);
+246-
+247:<<<<<<< HEAD
+248-  tgBot.command('reconnect', async (ctx) => {
+249-    if (ctx.chat.id !== config.telegram.groupId && ctx.chat.type !== 'private') return;
+250-    await ctx.reply('🔄 Đang thử kết nối lại Zalo bằng session cũ...');
+251-    try {
+252-      resetZaloApi();
+253-      const newApi = await getZaloApi();
+254-      _setZaloApi?.(newApi);
+255-      await startZalo(newApi, true);
+256-      await ctx.reply('✅ Đã kết nối lại Zalo thành công!');
+257-    } catch (err) {
+--
+391-  terminal.status('bridge', 'starting services…', 'info');
+392-
+393:<<<<<<< HEAD
+394-  // ── Graceful shutdown ──────────────────────────────────────────────────────
+395-  const shutdown = async (signal: string) => {
+396-    console.log(`\n[Boot] Received ${signal}, shutting down...`);
+397-    
+398-    // Gửi thông báo trước khi tắt (catch lỗi để không block quá trình tắt nếu rớt mạng)
+399-    await tgBot.telegram.sendMessage(
+400-      config.telegram.groupId,
+401-      '🛑 <b>Zalo ↔ Telegram Bridge</b> đã tắt (ngắt kết nối).',
+402-      { parse_mode: 'HTML' }
+403-    ).catch(() => undefined);
+=== src/store.ts ===
+1036-  caption?: string;
+1037-  captionMentions?: Array<{ pos: number; uid: string; len: number }>;
+1038:<<<<<<< HEAD
+1039-  tgMsgId?: number;
+1040-=======
+1041-  tgMsgId?:  number;
+1042-  isVideo?:  boolean;
+1043-  videoWidth?: number;
+1044-  videoHeight?: number;
+1045-  videoDuration?: number;
+1046->>>>>>> origin/main
+1047-}
+1048-
+--
+1100-
+1101-interface ZaloAlbumBuffer {
+1102:<<<<<<< HEAD
+1103-  timer: ReturnType<typeof setTimeout>;
+1104-  urls: string[];
+1105-  senderName: string;
+1106-  topicId: number;
+1107-  tgBase: { message_thread_id: number; reply_parameters?: { message_id: number; allow_sending_without_reply: boolean } };
+1108-  zaloMsgIds: string[];
+1109-  zaloQuote: ZaloQuoteData | undefined;
+1110-=======
+1111-  timer:      ReturnType<typeof setTimeout>;
+1112-  items:      ZaloAlbumItem[];
+=== src/telegram/handler.ts ===
+45-import { tgBot } from './bot.js';
+46-import { config } from '../config.js';
+47:<<<<<<< HEAD
+48-import { downloadToTemp, cleanTemp, convertToM4a, extractVideoThumbnail, convertWebmToGif } from '../utils/media.js';
+49-import { triggerQRLogin } from '../zalo/client.js';
+50-import { triggerAppLogin } from '../zalo/loginApp.js';
+51-import { invalidateAppSession, appGetReceivedFriendRequests, appGetSentFriendRequests, appGetGroupInfo, appGetGroupMembersInfo, appGetFriendProfilesV2, appRequestVoiceCall, appRequestGroupVoiceCall } from '../zalo/appApi.js';
+52-=======
+53-import { downloadToTemp, cleanTemp, convertStickerToPng, convertTgsToGif, convertToM4a, extractVideoThumbnail, convertWebmToGif } from '../utils/media.js';
+54-import { cancelActiveQRLogin, triggerQRLogin } from '../zalo/client.js';
+55-import { cancelActiveAppLogin, triggerAppLogin } from '../zalo/loginApp.js';
+56-import { loadAppSession, invalidateAppSession, appGetReceivedFriendRequests, appGetSentFriendRequests, appGetGroupInfo, appGetGroupMembersInfo } from '../zalo/appApi.js';
+57-import { resetMemberCacheLoaded } from '../zalo/handler.js';
+=== src/zalo/client.ts ===
+1-import { Zalo, LoginQRCallbackEventType } from 'zca-js';
+2-import type { LoginQRCallback } from 'zca-js';
+3:<<<<<<< HEAD
+4-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, statSync } from 'fs';
+5-import os from 'os';
+6-import path from 'path';
+7-=======
+8-import { existsSync, readFileSync, statSync } from 'fs';
+9->>>>>>> origin/main
+10-import { imageSizeFromFile } from 'image-size/fromFile';
+11-import qrcode from 'qrcode-terminal';
+12-import { config } from '../config.js';
+13-import { writePrivateJsonFileSync } from '../utils/privateFile.js';
+--
+235-  ) as { imei: string; cookie: unknown; userAgent: string };
+236-
+237:<<<<<<< HEAD
+238-  console.log('[Zalo] Đang đăng nhập bằng credentials đã lưu...');
+239-  try {
+240-    _api = (await zalo.login(credentials as Parameters<typeof zalo.login>[0])) as ZaloAPI;
+241-  } catch (err) {
+242-    if (isAuthError(err)) {
+243-      console.warn('[Zalo] Session hết hạn (auth error), đang xoá credentials cũ...');
+244-      clearCredentials();
+245-      _api = null;
+246-      throw new StaleCredentialsError(err);
+247-    }
+=== src/zalo/handler.ts ===
+7-
+8-import type { ZaloAPI, ZaloMessage, ZaloMediaContent, ZaloGroupInfoResponse } from './types.js';
+9:<<<<<<< HEAD
+10-import { appGetGroupInfo, appGetGroupMembersInfo, appGetFriendProfilesV2 } from './appApi.js';
+11-=======
+12-import { appGetGroupInfo, appGetGroupMembersInfo } from './appApi.js';
+13-import { extractReactionTargetMsgIds } from './reaction.js';
+14->>>>>>> origin/main
+15-import { ZALO_MSG_TYPES } from './types.js';
+16-import { store } from '../store.js';
+17-import { tgBot } from '../telegram/bot.js';
+18-import { config } from '../config.js';
+19-import { downloadToTemp, downloadToTempFromCandidates, cleanTemp, convertSpriteSheetToGif, sanitizeFileName, telegramMediaBatches } from '../utils/media.js';
+--
+22-import { msgStore, userCache, pollStore, sentMsgStore, zaloAlbumStore, reactionEchoStore, reactionSummaryStore, reactionEventDedupeStore, aliasCache, friendsCache, recentlyRecalledMsgIds, type ZaloQuoteData } from '../store.js';
+23-import { tgQueue } from '../utils/tgQueue.js';
+24:<<<<<<< HEAD
+25-import { syncGroupHistory } from './historySync.js';
+26-=======
+27-import { maybeAutoReply } from './autoReply.js';
+28->>>>>>> origin/main
+29-
+30-// Proxy that routes every tg.* call through the rate-limit queue
+31-// so 429 errors are auto-retried instead of crashing the process.
+32-const tg = new Proxy(tgBot.telegram, {
+33-  get(target, prop: string) {
+34-    const orig = (target as unknown as Record<string, unknown>)[prop];
+--
+74- * immediately even before any group message is received.
+75- */
+76:<<<<<<< HEAD
+77-let _userInfoRateLimitUntil = 0;
+78-
+79-async function populateGroupMemberCache(api: ZaloAPI, groupId: string): Promise<void> {
+80-  try {
+81-    let groupData = await appGetGroupInfo(groupId);
+82-    if (groupData) {
+83-      console.log(`[API][APP] getGroupInfo group=${groupId} source=populateGroupMemberCache`);
+84-    }
+85-
+86-    if (!groupData) {
+--
+352-): Promise<string> {
+353-  const cleanUid = uid?.trim();
+354:<<<<<<< HEAD
+355-  if (!cleanUid) {
+356-    console.log(`[NameResolve][ZALO] uid=<empty> source=fallback_input name="${fallback}"`);
+357-    return fallback;
+358-=======
+359-  if (!cleanUid) return fallback;
+360-
+361-  const friend = friendsCache.get(cleanUid);
+362-  const contactName = friend?.alias?.trim()
+363-    || aliasCache.get(cleanUid)?.trim()
+364-    || friend?.displayName?.trim();
+--
+782-const _memberCacheLoaded = new Set<string>();
+783-
+784:<<<<<<< HEAD
+785-=======
+786-/** Clear the loaded-set so the next setupZaloHandler re-populates all groups. */
+787-export function resetMemberCacheLoaded(): void {
+788-  _memberCacheLoaded.clear();
+789-}
+790-
+791-/**
+792- * In-flight dedup set — holds msgIds that are currently being processed.
+793- * Prevents race condition where multiple reaction re-emits arrive concurrently
+794- * before any of them is saved to msgStore, causing all to pass the msgStore check.
+--
+884-  void (async () => {
+885-    for (let i = 0; i < startupGroups.length; i++) {
+886:<<<<<<< HEAD
+887-      if (i > 0) await new Promise(r => setTimeout(r, 5000));
+888-      await populateGroupMemberCache(api, startupGroups[i].zaloId);
+889-=======
+890-      const gid = startupGroups[i].zaloId;
+891-      // A live message may have already warmed this group via the lazy path
+892-      // (handler below) during the stagger window — don't redo it, and don't
+893-      // mark groups "loaded" up-front or the lazy path is suppressed for groups
+894-      // whose cache hasn't actually populated yet.
+895-      if (_memberCacheLoaded.has(gid)) continue;
+896-      // Space the calls (a 0 ms gap made this a burst that could trip Zalo's
+--
+1028-      const _eagerMediaUrl = (() => {
+1029-        if (msgType === ZALO_MSG_TYPES.VIDEO || msgType === ZALO_MSG_TYPES.VOICE ||
+1030:<<<<<<< HEAD
+1031-          msgType === ZALO_MSG_TYPES.GIF || msgType === ZALO_MSG_TYPES.FILE) return media.href;
+1032-        if (msgType === ZALO_MSG_TYPES.PHOTO) {
+1033-          let u = media.href;
+1034-          try { const p = JSON.parse(media.params ?? '{}') as { hd?: string }; if (p.hd) u = p.hd; } catch { }
+1035-          return u;
+1036-        }
+1037-=======
+1038-            msgType === ZALO_MSG_TYPES.GIF   || msgType === ZALO_MSG_TYPES.FILE) return media.href;
+1039-        // Photos are deliberately downloaded after the short album debounce.
+1040-        // Starting one eager download per event leaks temp files when several
+--
+1060-      // display a slightly incorrect name than to display a raw UID during API rate limits.
+1061-      let displayName = senderName;
+1062:<<<<<<< HEAD
+1063-      let bridgeSenderName = msg.isSelf ? senderName : await resolveUserDisplayName(api, senderUid, senderName);
+1064-=======
+1065-      let bridgeSenderName = msg.isSelf
+1066-        ? senderName
+1067-        : await resolveUserDisplayName(api, senderUid, 'ai đó', type === ThreadType.Group ? zaloId : undefined);
+1068->>>>>>> origin/main
+1069-      let groupAvatarUrl: string | undefined;
+1070-      if (type === ThreadType.Group) {
+1071-        const info = await getCachedGroupInfo(api, zaloId);
+1072-        displayName = info.name || senderName;

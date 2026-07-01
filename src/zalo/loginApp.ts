@@ -15,12 +15,14 @@
 import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import axios, { type AxiosInstance } from 'axios';
 import { Zalo } from 'zca-js';
 import { imageSizeFromFile } from 'image-size/fromFile';
 import { statSync } from 'node:fs';
 import { config } from '../config.js';
+import { writePrivateJsonFileSync } from '../utils/privateFile.js';
+import { createSharedTempPath, prepareSharedTempFile } from '../utils/sharedTemp.js';
 import type { ZaloAPI } from './types.js';
 import type { QRLoginHooks } from './client.js';
 
@@ -185,9 +187,15 @@ function createSession(jar: CookieJar): AxiosInstance {
 
 // ── QR image ──────────────────────────────────────────────────────────────────
 
-const QR_TMP_DIR  = path.join(os.tmpdir(), 'zalo-tg-app');
-mkdirSync(QR_TMP_DIR, { recursive: true });
-const QR_IMG_PATH = path.join(QR_TMP_DIR, 'zalo-app-qr.png');
+let activeAppLoginController: AbortController | null = null;
+
+/** Abort the currently active PC-App QR polling flow, if any. */
+export function cancelActiveAppLogin(): boolean {
+  if (!activeAppLoginController) return false;
+  activeAppLoginController.abort();
+  activeAppLoginController = null;
+  return true;
+}
 
 // ── Main login flow ────────────────────────────────────────────────────────────
 
@@ -202,6 +210,14 @@ export interface AppLoginHooks extends QRLoginHooks {
  * @param hooks  Optional callbacks (forward QR image / status to Telegram).
  */
 export async function triggerAppLogin(hooks: AppLoginHooks = {}): Promise<{api: ZaloAPI, uid: string}> {
+  const loginController = new AbortController();
+  activeAppLoginController?.abort();
+  activeAppLoginController = loginController;
+  const ensureActive = (): void => {
+    if (loginController.signal.aborted) throw new Error('App QR login cancelled');
+  };
+
+  try {
   const jar     = new CookieJar();
   const session = createSession(jar);
   const imei    = crypto.randomUUID() + '-' + crypto.createHash('md5').update(PC_UA).digest('hex');
@@ -209,48 +225,63 @@ export async function triggerAppLogin(hooks: AppLoginHooks = {}): Promise<{api: 
 
   // ── Step 1: Request QR ──────────────────────────────────────────────────────
   console.log('[AppLogin] Requesting QR from Zalo PC API...');
-  const r1 = await session.get<{
-    error_code: number;
-    error_message?: string;
-    data?: {
-      base64_qr?:    string;
-      token_id?:     string;
-      chk_wait_cfirm?: string;
-    };
-  }>(AUTH_DOMAIN + '/api/login/reqqr', {
-    params: authParams({
-      language:      'vi',
-      client_time:   String(Math.floor(Date.now() / 1000)),
-      imei,
-      computer_name: host,
-      logged_uids:   '[]',
-    }, 'reqqr'),
-  });
 
-  if (r1.data.error_code !== 0) {
-    throw new Error(`[AppLogin] reqqr failed [${r1.data.error_code}]: ${r1.data.error_message ?? JSON.stringify(r1.data)}`);
+  const reqParams = authParams({
+    language:      'vi',
+    client_time:   String(Math.floor(Date.now() / 1000)),
+    imei,
+    computer_name: host,
+    logged_uids:   '[]',
+  }, 'reqqr');
+
+  const fullUrl = AUTH_DOMAIN + '/api/login/reqqr?' + new URLSearchParams(reqParams).toString();
+  console.log('[AppLogin] GET', fullUrl.replace(/signkey=[^&]+/, 'signkey=REDACTED'));
+
+  let r1Body: Record<string, unknown>;
+  try {
+    const r1Res = await fetch(fullUrl, {
+      headers: { 'User-Agent': PC_UA, 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!r1Res.ok) throw new Error(`HTTP ${r1Res.status}`);
+    r1Body = await r1Res.json() as Record<string, unknown>;
+  } catch (e: unknown) {
+    throw new Error(`[AppLogin] reqqr network error: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  const inner     = r1.data.data ?? {};
-  const base64Qr  = inner.base64_qr ?? '';
-  const tokenId   = inner.token_id ?? '';
-  const pollUrl   = inner.chk_wait_cfirm ?? '';
+  console.log('[AppLogin] reqqr response:', JSON.stringify(r1Body).slice(0, 300));
+
+  if (r1Body.error_code !== 0) {
+    throw new Error(`[AppLogin] reqqr failed [${String(r1Body.error_code)}]: ${String(r1Body.error_message ?? JSON.stringify(r1Body))}`);
+  }
+
+  const inner     = (r1Body.data as Record<string, unknown> | undefined) ?? {};
+  const base64Qr  = String(inner.base64_qr ?? '');
+  const tokenId   = String(inner.token_id ?? '');
+  const pollUrl   = String(inner.chk_wait_cfirm ?? '');
 
   if (!base64Qr && !tokenId) {
     throw new Error('[AppLogin] No QR data in reqqr response: ' + JSON.stringify(inner));
   }
 
-  // Save QR image (prefer base64 PNG from server, fall back to generated)
+  // Save QR image (prefer base64 PNG from server, fall back to generated).
+  // Use a fresh, writable path per login so stale/root-owned Docker files under
+  // /tmp from older runs cannot break non-root containers with EACCES.
+  const qrImgPath = createSharedTempPath('zalo-tg-app', 'zalo-app-qr', '.png');
   if (base64Qr) {
-    writeFileSync(QR_IMG_PATH, Buffer.from(base64Qr, 'base64'));
+    writeFileSync(qrImgPath, Buffer.from(base64Qr, 'base64'));
   } else {
     // Generate QR PNG from token_id using the qrcode npm package
     const qrcode = await import('qrcode');
-    await qrcode.toFile(QR_IMG_PATH, tokenId, { width: 400, margin: 2 });
+    await qrcode.toFile(qrImgPath, tokenId, { width: 400, margin: 2 });
   }
+  prepareSharedTempFile(qrImgPath);
 
   // Notify hook (e.g. send photo to Telegram)
-  await hooks.onQRReady?.(QR_IMG_PATH, tokenId).catch(console.error);
+  // Do not continue polling when Telegram failed to receive the QR. Let the
+  // command handler report the error and release its in-progress lock.
+  await hooks.onQRReady?.(qrImgPath, tokenId);
+  ensureActive();
 
   // ── Step 2: Poll for scan ────────────────────────────────────────────────────
   if (!pollUrl) throw new Error('[AppLogin] No poll URL returned from reqqr');
@@ -259,8 +290,12 @@ export async function triggerAppLogin(hooks: AppLoginHooks = {}): Promise<{api: 
   let confirmed = false;
   for (let i = 0; i < 90 && !confirmed; i++) {
     await new Promise(r => setTimeout(r, 2000));
+    ensureActive();
     try {
-      const pr = await session.get<{ error_code?: number; errorCode?: number }>(pollUrl, { timeout: 10_000 });
+      const pr = await session.get<{ error_code?: number; errorCode?: number }>(pollUrl, {
+        timeout: 10_000,
+        signal: loginController.signal,
+      });
       const ec = pr.data.error_code ?? pr.data.errorCode ?? -1;
       if (ec === 0) { confirmed = true; break; }
     } catch { /* network hiccup — keep polling */ }
@@ -276,6 +311,7 @@ export async function triggerAppLogin(hooks: AppLoginHooks = {}): Promise<{api: 
     error_message?: string;
     data?: Record<string, unknown>;
   }>(AUTH_DOMAIN + '/api/login/getLoginInfo', {
+    signal: loginController.signal,
     params: authParams({
       imei,
       computer_name: host,
@@ -289,7 +325,7 @@ export async function triggerAppLogin(hooks: AppLoginHooks = {}): Promise<{api: 
   }
 
   const loginData = r4.data.data ?? {};
-  const uid       = String(loginData['uid'] ?? loginData['dkey'] ?? '');
+  const uid       = String(loginData['uid'] ?? '');
   const displayName: string = (() => {
     const n = loginData['send2me_name'] ?? loginData['name'] ?? loginData['zaloName'] ?? uid;
     if (typeof n === 'object' && n !== null) {
@@ -306,24 +342,24 @@ export async function triggerAppLogin(hooks: AppLoginHooks = {}): Promise<{api: 
   const cookies = jar.toZcaFormat();
   const credentials = { imei, cookie: cookies, userAgent: PC_UA };
 
-  // Persist so the bridge can auto-login on next restart
+  // Persist so the bridge can auto-login on next restart. Session files are
+  // authentication material, so keep them owner-readable only where supported.
   mkdirSync(config.zalo.credentialsDir, { recursive: true });
-  writeFileSync(
-    path.join(config.zalo.credentialsDir, 'credentials_app.json'),
-    JSON.stringify(credentials, null, 2),
-    'utf8',
-  );
-  console.log(`[AppLogin] Credentials saved → ${path.join(config.zalo.credentialsDir, 'credentials_app.json')}`);
+  const appCredPath = path.join(config.zalo.credentialsDir, 'credentials_app.json');
+  writePrivateJsonFileSync(appCredPath, credentials);
+  console.log(`[AppLogin] Credentials saved → ${appCredPath}`);
 
   // Save app-session.json with zpw_enk + raw zaloapp.com cookies for direct PC App API calls
   const zpwEnk = String(loginData['zpw_enk'] ?? '');
+  const dkey   = String(loginData['dkey'] ?? '');
   if (zpwEnk) {
     const appSessionPath = path.join(config.zalo.credentialsDir, 'app-session.json');
-    writeFileSync(
-      appSessionPath,
-      JSON.stringify({ zpw_enk: zpwEnk, imei, cookies: jar.toRawPairs() }, null, 2),
-      'utf8',
-    );
+    writePrivateJsonFileSync(appSessionPath, {
+      zpw_enk: zpwEnk,
+      dkey: dkey || undefined,
+      imei,
+      cookies: jar.toRawPairs(),
+    });
     console.log(`[AppLogin] App session saved → ${appSessionPath}`);
   }
 
@@ -344,4 +380,7 @@ export async function triggerAppLogin(hooks: AppLoginHooks = {}): Promise<{api: 
   console.log('[AppLogin] zca-js login successful ✓');
   await hooks.onSuccess?.().catch(console.error);
   return {api, uid};
+  } finally {
+    if (activeAppLoginController === loginController) activeAppLoginController = null;
+  }
 }

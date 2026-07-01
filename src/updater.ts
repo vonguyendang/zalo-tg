@@ -1,9 +1,11 @@
 import { execSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { Telegraf, Telegram } from 'telegraf';
+import type { Context, Telegraf, Telegram } from 'telegraf';
 
 import { config } from './config.js';
+import { requestShutdown } from './lifecycle.js';
+import { escapeHtml } from './utils/format.js';
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -35,13 +37,34 @@ function getChangelog(): string {
 
 export function startUpdateChecker(bot: Telegraf): void {
 
+  const isAdminCallback = async (ctx: Context): Promise<boolean> => {
+    const callbackQuery = ctx.callbackQuery;
+    const from = ctx.from;
+    const message = callbackQuery?.message;
+    if (!message || !from || message.chat.id !== config.telegram.groupId) return false;
+    try {
+      const member = await ctx.telegram.getChatMember(config.telegram.groupId, from.id);
+      return member.status === 'creator' || member.status === 'administrator';
+    } catch {
+      return false;
+    }
+  };
+
   // ── Inline button handlers (must be registered before catch-all callback_query) ─
   bot.action('upd:skip', async (ctx) => {
+    if (!await isAdminCallback(ctx)) {
+      await ctx.answerCbQuery('⛔ Chỉ admin Telegram mới có thể thao tác.', { show_alert: true }).catch(() => undefined);
+      return;
+    }
     await ctx.answerCbQuery('⏰ Đã huỷ').catch(() => undefined);
     await ctx.deleteMessage().catch(() => undefined);
   });
 
   bot.action('upd:confirm', async (ctx) => {
+    if (!await isAdminCallback(ctx)) {
+      await ctx.answerCbQuery('⛔ Chỉ admin Telegram mới có thể cập nhật.', { show_alert: true }).catch(() => undefined);
+      return;
+    }
     if (_isUpdating) {
       await ctx.answerCbQuery('⏳ Đang cập nhật...').catch(() => undefined);
       return;
@@ -82,7 +105,7 @@ export function startUpdateChecker(bot: Telegraf): void {
           { parse_mode: 'HTML' },
         ).catch(() => undefined);
         console.log('[Updater] Update complete — restarting via exit code 42');
-        setTimeout(() => process.exit(42), 500);
+        setTimeout(() => { void requestShutdown('Update installed', 42); }, 500);
       } else {
         await ctx.editMessageText(
           '✅ <b>Cập nhật thành công!</b>\nChạy <code>./run.sh</code> thay vì <code>npm start</code> để tự động restart.\nHoặc khởi động lại thủ công.',
@@ -95,7 +118,7 @@ export function startUpdateChecker(bot: Telegraf): void {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[Updater] Update failed:', msg);
       await ctx.editMessageText(
-        `❌ <b>Cập nhật thất bại</b>\n<code>${msg}</code>`,
+        `❌ <b>Cập nhật thất bại</b>\n<code>${escapeHtml(msg)}</code>`,
         { parse_mode: 'HTML' },
       ).catch(() => undefined);
       _isUpdating = false;
@@ -123,7 +146,7 @@ async function sendUpdateNotification(tg: Telegram, commit: string): Promise<voi
       config.telegram.groupId,
       `🔔 <b>Có bản cập nhật mới!</b> (<code>${commit}</code>)\n\n${
         changelog
-          ? changelog.split('\n').slice(0, 10).map(l => `• ${l}`).join('\n')
+          ? changelog.split('\n').slice(0, 10).map(l => `• ${escapeHtml(l)}`).join('\n')
           : ''
       }`,
       {

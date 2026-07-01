@@ -11,6 +11,7 @@ import { tgBot } from '../telegram/bot.js';
 import { config } from '../config.js';
 import { downloadToTemp, cleanTemp } from '../utils/media.js';
 import { applyZaloMarkupHtml, formatGroupMsgHtml, formatGroupMsg, groupCaption, topicName, truncate, escapeHtml } from '../utils/format.js';
+import { maybeAutoReply } from './autoReply.js';
 import type { ZaloStyle } from '../utils/format.js';
 import { msgStore, userCache, pollStore, sentMsgStore, zaloAlbumStore, reactionEchoStore, reactionSummaryStore, reactionEventDedupeStore, aliasCache, friendsCache, recentlyRecalledMsgIds, type ZaloQuoteData } from '../store.js';
 import { tgQueue } from '../utils/tgQueue.js';
@@ -929,11 +930,12 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
           albumKey,
           url,
           zaloMsgIds,
+          photoCaption,
           { senderName: bridgeSenderName, topicId, tgBase, zaloQuote: zaloQuoteData },
-          async (buf) => {
-            if (buf.urls.length === 1) {
+          async (buf: any) => {
+            if (buf.items.length === 1) {
               // Single photo — reuse eagerly started download (likely already done)
-              const singleUrl = buf.urls[0]!;
+              const singleUrl = buf.items[0].url;
               const localPath = await (earlyDlPromise ?? downloadToTemp(singleUrl, `photo_${Date.now()}.jpg`));
               const stream = createReadStream(localPath);
               try {
@@ -943,21 +945,20 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
                   {
                     ...buf.tgBase,
                     parse_mode: 'HTML' as const,
-                    caption: photoCaption
-                      ? `${groupCaption(buf.senderName)}
-${escapeHtml(photoCaption)}`
+                    caption: buf.caption
+                      ? `${groupCaption(buf.senderName)}\n${escapeHtml(buf.caption)}`
                       : groupCaption(buf.senderName),
                   },
                 );
                 // Use buf.zaloQuote which already has the correct cliMsgId and
                 // parsed media content object (not raw JSON string).
-                msgStore.save(accountId, sent.message_id, buf.zaloMsgIds, buf.zaloQuote!);
+                msgStore.save(accountId, sent.message_id, buf.items[0].msgIds, buf.items[0].zaloQuote);
               } finally { await cleanTemp(localPath); }
             } else {
               // Multi-photo album — download all concurrently and send as media group
               const localPaths: string[] = [];
               try {
-                const dlResults = await Promise.allSettled(buf.urls.map(u => downloadToTemp(u, `photo_${Date.now()}.jpg`)));
+                const dlResults = await Promise.allSettled(buf.items.map((i: any) => downloadToTemp(i.url, `photo_${Date.now()}.jpg`)));
                 const dlPaths = dlResults.flatMap(r => {
                   if (r.status === 'fulfilled') return [r.value];
                   console.warn('[ZaloHandler] Album: skipping failed photo download:', r.reason);
@@ -965,9 +966,8 @@ ${escapeHtml(photoCaption)}`
                 });
                 if (dlPaths.length === 0) return;
                 localPaths.push(...dlPaths);
-                const captionText = photoCaption
-                  ? `${groupCaption(buf.senderName)}
-${escapeHtml(photoCaption)}`
+                const captionText = buf.caption
+                  ? `${groupCaption(buf.senderName)}\n${escapeHtml(buf.caption)}`
                   : groupCaption(buf.senderName);
                 // Telegram limits media groups to 10 items — split into batches
                 const BATCH = 10;
@@ -986,8 +986,9 @@ ${escapeHtml(photoCaption)}`
                   );
                   // Save mapping for every photo so replying to ANY album photo
                   // produces a valid Zalo quote
-                  for (const sentMsg of sentMsgs) {
-                    msgStore.save(accountId, sentMsg.message_id, buf.zaloMsgIds, buf.zaloQuote!);
+                  for (let j = 0; j < sentMsgs.length; j++) {
+                    const idx = i + j;
+                    msgStore.save(accountId, sentMsgs[j].message_id, buf.items[idx].msgIds, buf.items[idx].zaloQuote);
                   }
                 }
               } finally {
@@ -1615,7 +1616,7 @@ ${escapeHtml(photoCaption)}`
     const sorted = [...messages].sort((a, b) => Number(a?.data?.ts ?? 0) - Number(b?.data?.ts ?? 0));
     console.log(`[Zalo→TG] Catch-up old_messages: replay ${sorted.length} item(s)`);
     for (const oldMsg of sorted) {
-      api.listener.emit('message', oldMsg);
+      api.listener.emit('message', oldMsg as any);
     }
   });
 
@@ -1774,6 +1775,8 @@ ${escapeHtml(photoCaption)}`
       if (entry.debounceTimer) clearTimeout(entry.debounceTimer);
       entry.debounceTimer = setTimeout(async () => {
         entry.debounceTimer = null;
+        const didReply = await maybeAutoReply(api, accountId, zaloId, type);
+        if (didReply) return;
         const text = reactionSummaryStore.buildText(entry);
         if (!text) return;
         // Skip if text hasn't changed (same person reacting fires multiple events)
