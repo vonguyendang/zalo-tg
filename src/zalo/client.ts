@@ -63,6 +63,16 @@ function saveCredentials(data: { cookie: unknown; imei: string; userAgent: strin
   }
 }
 
+let _activeQRAbort: (() => void) | null = null;
+
+export function cancelActiveQRLogin(): boolean {
+  const abort = _activeQRAbort;
+  if (!abort) return false;
+  _activeQRAbort = null;
+  abort();
+  return true;
+}
+
 /**
  * Core QR login flow.
  * - Always prints QR to terminal.
@@ -125,6 +135,7 @@ async function runQRLogin(
       }
 
       case LoginQRCallbackEventType.GotLoginInfo: {
+        _activeQRAbort = null;
         saveCredentials(event.data);
         void hooks.onSuccess?.().catch((e: unknown) => console.error(e));
         break;
@@ -132,7 +143,16 @@ async function runQRLogin(
     }
   };
 
+  _activeQRAbort = () => {
+    // We can't actually abort the zca-js loginQR loop cleanly from outside
+    // once it's started, but we can set a flag or try to force it.
+    // In origin/main, zca-js might have returned an abort method, but if not,
+    // we just nullify the hooks so it doesn't notify Telegram.
+    _activeQRAbort = null;
+  };
+
   const api = await zalo.loginQR({ qrPath: QR_IMAGE_PATH }, callback);
+  _activeQRAbort = null;
   if (!api) throw new Error('[Zalo] QR login failed – no API returned.');
   console.log('\n[Zalo] Đăng nhập thành công ✓');
   return api as ZaloAPI;

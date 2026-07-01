@@ -9,7 +9,7 @@ WORKDIR /app
 # Copy package files to leverage Docker layer caching
 COPY package*.json ./
 # 'npm ci' is used instead of 'npm install' for faster, reliable builds in CI/CD
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 
 # Stage 2: Build the source code
 FROM node:20-alpine AS builder
@@ -24,7 +24,7 @@ FROM node:20-alpine AS prod-deps
 WORKDIR /app
 COPY package*.json ./
 # Install only production dependencies to minimize final image size
-RUN npm ci --only=production
+RUN npm ci --omit=dev --no-audit --no-fund
 
 # Stage 4: Runtime environment
 FROM base AS runner
@@ -32,8 +32,11 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Create a non-root user for security purposes
-RUN addgroup -S nodejs && adduser -S nodejs -G nodejs
+# Create a deterministic non-root runtime user and fail the image build if the
+# account database is ever corrupted by a stale Docker layer.
+RUN addgroup -S -g 10001 nodejs \
+    && adduser -S -D -H -u 10001 -G nodejs nodejs \
+    && id nodejs
 
 # Copy build artifacts and production dependencies
 # --chown is used here to avoid creating an extra layer with 'RUN chown'

@@ -1,4 +1,4 @@
-import type { ThreadType } from 'zca-js';
+import type { API, ThreadType } from 'zca-js';
 
 // ── Incoming Zalo message ─────────────────────────────────────────────────────
 
@@ -104,5 +104,4 @@ export interface ZaloGroupInfoResponse {
   gridInfoMap: Record<string, ZaloGridInfo>;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type ZaloAPI = any;
+export type ZaloAPI = API;

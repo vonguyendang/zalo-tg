@@ -8,6 +8,7 @@ Type=simple
 User=root
 WorkingDirectory=/root/zalo-tg
 EnvironmentFile=/root/zalo-tg/.env
+Environment=ZALO_TG_RUNNER=1
 
 # Build first, then run compiled JS (tiết kiệm RAM hơn tsx)
 ExecStartPre=/usr/bin/npm run build
