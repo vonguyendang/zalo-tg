@@ -315,9 +315,23 @@ async function main(): Promise<void> {
         }
         for (const [accountId, api] of apis.entries()) {
            const uid = api.getOwnId?.();
-           const user = uid ? await api.getUserInfo(uid).catch(() => undefined) : undefined;
-    // @ts-ignore
-           const accountName = user?.name || accountAliasStore.get(accountId) || 'Zalo';
+           let fetchedName: string | undefined;
+           if (uid) {
+             const resp = await api.getUserInfo(uid).catch(() => undefined) as any;
+             if (resp) {
+               const uidKey = uid.includes('_') ? uid : `${uid}_0`;
+               const profile =
+                 resp.changed_profiles?.[uidKey] ??
+                 resp.changed_profiles?.[uid] ??
+                 resp.unchanged_profiles?.[uidKey] ??
+                 resp.unchanged_profiles?.[uid];
+               fetchedName = profile?.displayName?.trim() || profile?.zaloName?.trim();
+             }
+           }
+           const accountName = fetchedName || accountAliasStore.get(accountId) || 'Zalo';
+           if (fetchedName && accountName !== accountAliasStore.get(accountId)) {
+             accountAliasStore.set(accountId, fetchedName);
+           }
            
            if (apis.size === 1) {
               store.migrateDefaultAccount(accountId);

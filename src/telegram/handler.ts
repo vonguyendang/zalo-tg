@@ -323,7 +323,24 @@ async function handleLoginCommand(
       },
     });
 
-    onNewApi(newApi.api, newApi.uid, 'Zalo');
+    let fetchedName = 'Zalo';
+    try {
+      const resp = await newApi.api.getUserInfo(newApi.uid).catch(() => undefined) as any;
+      if (resp) {
+        const uidKey = newApi.uid.includes('_') ? newApi.uid : `${newApi.uid}_0`;
+        const profile =
+          resp.changed_profiles?.[uidKey] ??
+          resp.changed_profiles?.[newApi.uid] ??
+          resp.unchanged_profiles?.[uidKey] ??
+          resp.unchanged_profiles?.[newApi.uid];
+        fetchedName = profile?.displayName?.trim() || profile?.zaloName?.trim() || 'Zalo';
+        if (fetchedName !== 'Zalo') {
+          accountAliasStore.set(newApi.uid, fetchedName);
+        }
+      }
+    } catch {}
+
+    onNewApi(newApi.api, newApi.uid, fetchedName);
   } catch (err) {
     await tgBot.telegram.sendMessage(
       chatId,
@@ -448,9 +465,25 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       });
 
       invalidateAppSession();
-      currentApi = newApi.api;
+      let fetchedName = 'Zalo';
+      try {
+        const resp = await newApi.api.getUserInfo(newApi.uid).catch(() => undefined) as any;
+        if (resp) {
+          const uidKey = newApi.uid.includes('_') ? newApi.uid : `${newApi.uid}_0`;
+          const profile =
+            resp.changed_profiles?.[uidKey] ??
+            resp.changed_profiles?.[newApi.uid] ??
+            resp.unchanged_profiles?.[uidKey] ??
+            resp.unchanged_profiles?.[newApi.uid];
+          fetchedName = profile?.displayName?.trim() || profile?.zaloName?.trim() || 'Zalo';
+          if (fetchedName !== 'Zalo') {
+            accountAliasStore.set(newApi.uid, fetchedName);
+          }
+        }
+      } catch {}
+
     // @ts-ignore
-      void onLoginCb(newApi.api, newApi.uid, 'Zalo').catch((e: unknown) => console.error('[/loginapp] onZaloLogin error:', e));
+      void onLoginCb(newApi.api, newApi.uid, fetchedName).catch((e: unknown) => console.error('[/loginapp] onZaloLogin error:', e));
     } catch (err) {
       await tgBot.telegram.sendMessage(
         chatId,
