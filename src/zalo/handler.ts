@@ -1958,7 +1958,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
           const tId = store.getTopicByZalo(accountId, groupId, 1);
           if (tId !== undefined) {
             await tg.editForumTopic(
-              config.telegram.groupId, tId, { name: topicName(newName, 1) },
+              config.telegram.groupId, tId, { name: `[${accountName}] ` + topicName(newName, 1) },
             ).catch(() => undefined);
             const existing = store.getEntryByTopic(tId);
             if (existing) store.set({ ...existing, name: newName });
