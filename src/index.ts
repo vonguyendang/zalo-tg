@@ -5,20 +5,25 @@ import { tgBot, syncTelegramCommands } from './telegram/bot.js';
 import { setupTelegramHandler } from './telegram/handler.js';
 import { config } from './config.js';
 import { startUpdateChecker } from './updater.js';
-import { store } from './store.js';
+import { store, userCache } from './store.js';
+import { registerShutdownHandler, requestShutdown } from './lifecycle.js';
+import { terminal } from './utils/terminal.js';
 
 // ── Global safety net — prevent unhandled rejections from crashing ────────────
 process.on('unhandledRejection', (reason) => {
   console.error('[Boot] Unhandled rejection (ignored):', reason);
 });
 process.on('uncaughtException', (err) => {
-  console.error('[Boot] Uncaught exception (ignored):', err);
+  console.error('[Boot] Uncaught exception:', err);
+  void requestShutdown('Uncaught exception', 43);
 });
 
 // ── Module-level ref to Telegram handler's API setter (used by reconnect) ──────
 let _setZaloApi: ((api: Awaited<ReturnType<typeof getZaloApi>>) => void) | null = null;
 let _reconnectInProgress = false;
 let _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let _activeZaloApi: Awaited<ReturnType<typeof getZaloApi>> | null = null;
+let _bridgeReadyAnnounced = false;
 
 // ── Boot Zalo (also used when /login swaps in a fresh API) ───────────────────
 
@@ -34,7 +39,7 @@ async function pruneLeftGroupTopics(api: Awaited<ReturnType<typeof getZaloApi>>)
       }
     }
     if (removed.length > 0) {
-      console.log(`[Boot] Pruned ${removed.length} stale group topic(s): ${removed.join(', ')}`);
+      terminal.status('topics', `pruned ${removed.length} stale mapping(s)`, 'warn');
     }
   } catch (err) {
     console.warn('[Boot] Could not prune stale group topics:', err);
@@ -45,6 +50,7 @@ async function startZalo(
   api: Awaited<ReturnType<typeof getZaloApi>>,
   isReconnect = false,
 ): Promise<void> {
+  _activeZaloApi = api;
   if (!isReconnect) void pruneLeftGroupTopics(api);
   await setupZaloHandler(api);
   if (isReconnect) {
@@ -55,14 +61,19 @@ async function startZalo(
         api.listener.requestOldMessages(ThreadType.Group);
         api.listener.requestOldReactions(ThreadType.User);
         api.listener.requestOldReactions(ThreadType.Group);
-        console.log('[Boot] Requested catch-up sync after reconnect');
+        terminal.status('sync', 'catch-up requested after reconnect', 'info');
       } catch (err) {
         console.warn('[Boot] Failed to request catch-up sync:', err);
       }
     });
   }
   api.listener.start();
-  console.log(`[Boot] Zalo listener ${isReconnect ? 're' : ''}started ✓`);
+  terminal.status('zalo', `listener ${isReconnect ? 're' : ''}started`, 'success');
+  if (!_bridgeReadyAnnounced) {
+    _bridgeReadyAnnounced = true;
+    terminal.status('bridge', 'ready · forwarding active', 'success');
+    terminal.section('LIVE ACTIVITY');
+  }
 
   const scheduleReconnect = (delayMs: number): void => {
     if (_reconnectTimer || _reconnectInProgress) return;
@@ -77,7 +88,7 @@ async function startZalo(
           _setZaloApi?.(newApi);
           await startZalo(newApi, true);
           tgBot.telegram.sendMessage(config.telegram.groupId, '✅ Zalo đã kết nối lại và đang đồng bộ lại tin gần đây.').catch(() => undefined);
-          console.log('[Boot] Zalo reconnected ✓');
+          terminal.status('zalo', 'reconnected and syncing', 'success');
         } catch (err) {
           console.error('[Boot] Zalo reconnect failed:', err);
           tgBot.telegram.sendMessage(
@@ -123,9 +134,11 @@ async function startZalo(
 }
 
 async function main(): Promise<void> {
-  console.log('╔══════════════════════════════════════╗');
-  console.log('║   Zalo ↔ Telegram Bridge  v1.0.0    ║');
-  console.log('╚══════════════════════════════════════╝');
+  await terminal.intro('1.0.0');
+  terminal.installConsoleTheme();
+  terminal.section('STARTUP');
+  terminal.status('runtime', `${process.version} · pid ${process.pid}`, 'muted');
+  terminal.status('cache', `${userCache.stats().users} users · ${store.all().length} topics restored`, 'muted');
 
   // ── Auto update checker — must register BEFORE setupTelegramHandler ─────────
   // bot.action() is middleware; the catch-all on('callback_query') in handler.ts
@@ -153,20 +166,40 @@ async function main(): Promise<void> {
     { command: 'leavegroup',     description: 'Rời nhóm Zalo & đóng topic (dùng trong topic nhóm)' },
     { command: 'friendrequests', description: 'Xem lời mời kết bạn & lời mời nhóm' },
     { command: 'topic',          description: 'Quản lý topic: list / info / delete' },
+    { command: 'history',        description: 'Nạp lịch sử chat nhóm vào topic (dùng trong topic nhóm)' },
+    { command: 'autoreply',      description: 'Tự trả lời DM khi offline: on / off / status' },
     { command: 'recall',         description: 'Thu hồi tin nhắn (reply vào tin đã gửi)' },
     { command: 'admin',          description: 'Admin panel: trạng thái, cache, tra mapping' },
     { command: 'status',         description: 'Xem trạng thái bridge: uptime, số topic, Zalo' },
+    { command: 'restart',        description: 'Khởi động lại bridge (chỉ admin)' },
     { command: 'update',         description: 'Kiểm tra bản cập nhật mới' },
   ]).catch(() => undefined);
+
+  // ── Graceful shutdown/restart shared by signals, commands and polling ──────
+  registerShutdownHandler(async (reason, exitCode) => {
+    // Animate while listeners stop and debounced stores flush, so shutdown is
+    // both visually smooth and operationally useful rather than a fixed delay.
+    const outro = terminal.shutdown(`${reason} · exit ${exitCode}`);
+    if (_reconnectTimer) {
+      clearTimeout(_reconnectTimer);
+      _reconnectTimer = null;
+    }
+    try { _activeZaloApi?.listener.stop(); } catch { /* ignore */ }
+    try { await tgBot.stop(reason); } catch { /* bot may not have launched yet */ }
+    // Let debounced msg/user-cache persistence finish before process exit.
+    await new Promise(r => setTimeout(r, 2500));
+    await outro;
+    process.exit(exitCode);
+  });
 
   // ── Start Telegram bot so /login can be received immediately ───────────────
   // NOTE: tgBot.launch() runs the polling loop forever, so we must NOT await it.
   // The second argument callback fires once getMe() + deleteWebhook() succeed.
-  tgBot.launch({ allowedUpdates: ['message', 'callback_query', 'message_reaction', 'poll_answer', 'poll'] }, () => {
-    console.log('[Boot] Telegram bot started ✓');
+  void tgBot.launch({ allowedUpdates: ['message', 'callback_query', 'message_reaction', 'poll_answer', 'poll'] }, () => {
+    terminal.status('telegram', 'polling connected', 'success');
 
     syncTelegramCommands()
-      .then(() => console.log('[Boot] Telegram command menu synced ✓'))
+      .then(() => terminal.status('commands', 'menu synchronized', 'success'))
       .catch((err: unknown) => console.warn('[Boot] Failed to sync Telegram commands:', err));
 
     // ── Attempt Zalo login in background ────────────────────────────────────
@@ -187,22 +220,17 @@ async function main(): Promise<void> {
           )
           .catch(() => undefined);
       });
+  }).catch((err: unknown) => {
+    console.error('[Boot] Telegram polling stopped:', err);
+    // Do not leave a half-alive Zalo-only bridge. A supervisor/run.sh can
+    // restart exit code 43; a direct npm start exits visibly instead of lying.
+    void requestShutdown('Telegram polling failure', 43);
   });
 
-  console.log('[Boot] Bridge is running 🚀  (Ctrl+C to stop)');
+  terminal.status('bridge', 'starting services…', 'info');
 
-  // ── Graceful shutdown ──────────────────────────────────────────────────────
-  const shutdown = async (signal: string) => {
-    console.log(`\n[Boot] Received ${signal}, shutting down...`);
-    try { const api = await getZaloApi(); api.listener.stop(); } catch { /* ignore */ }
-    await tgBot.stop(signal);
-    // Wait for debounced persistence (msgStore 1000ms, userCache 2000ms) to flush
-    await new Promise(r => setTimeout(r, 2500));
-    process.exit(0);
-  };
-
-  process.once('SIGINT',  () => shutdown('SIGINT'));
-  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT',  () => { void requestShutdown('Received SIGINT', 0); });
+  process.once('SIGTERM', () => { void requestShutdown('Received SIGTERM', 0); });
 }
 
 main().catch((err: unknown) => {
