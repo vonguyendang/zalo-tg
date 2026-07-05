@@ -23,6 +23,12 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
       - run: npm ci
+      - run: go test ./...
+      - run: npm run tui:build
       - run: npm run check
       - run: npm run security:audit
