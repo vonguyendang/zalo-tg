@@ -63,7 +63,7 @@ The curl installer clones or updates the project in `./zalo-tg` under your curre
 To choose another install directory:
 
 ```bash
-ZALO_TG_INSTALL_DIR=/opt/zalo-tg curl -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh | ZALO_TG_INSTALL_DIR=/opt/zalo-tg sh
 ```
 
 If you already cloned the repository:
