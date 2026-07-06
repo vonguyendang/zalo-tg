@@ -7,6 +7,7 @@
     "dev": "NODE_OPTIONS=--disable-warning=DEP0205 tsx src/index.ts",
     "dev:watch": "NODE_OPTIONS=--disable-warning=DEP0205 node --watch --import tsx src/index.ts",
     "build": "tsc",
+    "tui:build": "go build -o bin/zalo-tg-tui ./cmd/zalo-tg-tui && GOBIN=$PWD/bin go install github.com/charmbracelet/glow@v1.5.1",
     "start": "node --disable-warning=DEP0205 dist/index.js",
     "test": "NODE_OPTIONS=--disable-warning=DEP0205 tsx --test tests/*.test.ts",
     "check": "npm run build && npm test",

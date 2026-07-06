@@ -27,6 +27,8 @@ The bridge is designed as a single Telegram bot/router with one active Zalo acco
 
 - Node.js `>=20.11`
 - npm
+- Git (required for the curl installer and update flow)
+- Optional: Go `>=1.24` to build the Charmbracelet TUI sidecar
 - A Telegram bot token
 - A Telegram supergroup with forum topics enabled
 - The bot must be admin in that Telegram group
@@ -35,30 +37,93 @@ The bridge is designed as a single Telegram bot/router with one active Zalo acco
 
 ## Quick start
 
+Recommended one-line installer:
+
+macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh | sh
+```
+
+Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh | sh
+```
+
+Windows, through PowerShell plus Git Bash/WSL `sh`:
+
+```powershell
+curl.exe -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh -o install.sh
+sh install.sh
+```
+
+The curl installer clones or updates the project in `./zalo-tg` under your current terminal directory by default, then checks Node/npm/Go, installs npm dependencies, builds the Charmbracelet TUI sidecar when Go is available, and opens a polished `.env` setup wizard. It auto-runs default actions without waiting for yes/no confirmations; existing `.env` files are backed up before the wizard writes a fresh one.
+
+To choose another install directory:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh | ZALO_TG_INSTALL_DIR=/opt/zalo-tg sh
+```
+
+If you already cloned the repository:
+
+```bash
+sh install.sh
+```
+
+For unattended setup:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh | sh -s -- --yes
+```
+
+Manual setup:
+
 ```bash
 npm ci
 cp .env.example .env # if your checkout contains one; otherwise create .env manually
 npm run dev
 ```
 
-Minimum `.env`:
+Required `.env` keys:
 
 ```env
 TG_TOKEN=123456:telegram-bot-token
 TG_GROUP_ID=-1001234567890
-
-# Optional paths
-DATA_DIR=./data
-ZALO_CREDENTIALS_PATH=./credentials.json
-
-# Optional Telegram Local Bot API
-LOCAL_BOT_API=0
-TG_LOCAL_SERVER=http://127.0.0.1:8081
-
-# Optional Zalo behavior
-ZALO_SKIP_MUTED_GROUPS=0
-ZALO_MUTE_SILENT=1
 ```
+
+Copy [.env.example](.env.example) for the full template. Complete configuration reference:
+
+| Variable | Default / example | Used by | Purpose |
+| --- | --- | --- | --- |
+| `TG_TOKEN` | required | app | Telegram bot token from @BotFather. |
+| `TG_GROUP_ID` | required, e.g. `-1001234567890` | app | Telegram supergroup/forum ID. Must be negative; bot must be admin and Topics must be enabled. |
+| `DATA_DIR` | `./data` | app | Persistent store directory for topics, message maps, user cache, polls and auto-reply state. |
+| `ZALO_CREDENTIALS_PATH` | `./credentials.json` | app | Zalo login credentials written after QR login. Keep private. |
+| `ZALO_SKIP_MUTED_GROUPS` | `0` | app | `1` skips messages from muted Zalo groups entirely. |
+| `ZALO_MUTE_SILENT` | `1` | app | `1` mirrors Zalo muted threads as silent Telegram messages; `0` always notifies. |
+| `LOCAL_BOT_API` | `0` | app | `1` sends Telegram Bot API calls to `TG_LOCAL_SERVER`; `0` uses official `api.telegram.org`. |
+| `TG_LOCAL_SERVER` | `http://127.0.0.1:8081` | app / Compose override | Local Bot API endpoint. Required only when `LOCAL_BOT_API=1`; Compose overrides it to `http://telegram-bot-api:8081`. |
+| `TG_API_ID` | empty | Docker Compose | Telegram API ID for the `telegram-bot-api` container; get it from my.telegram.org. |
+| `TG_API_HASH` | empty | Docker Compose | Telegram API hash for the `telegram-bot-api` container. |
+| `TG_LOCAL_PORT` | `8081` | Docker Compose | Host port exposed by the local Bot API service. |
+| `TGBOTAPI_DATA_DIR` | `./data/bot-api` | `start-local-api.sh` | Data/log directory for a locally installed `telegram-bot-api` binary. Docker Compose does not use this. |
+| `ZALO_TG_SHARED_TMP_ROOT` | auto | app | Shared temp root for file paths that must be visible to both the bridge and local Bot API. Defaults to `/tmp` in local mode on POSIX, otherwise OS temp. |
+| `ZALO_TG_RUNNER` | unset | app / Compose | Set to `1` only when an external supervisor restarts the process after update/restart exit codes. Do not set `0`; leave unset. |
+| `NODE_ENV` | Docker sets `production` | Docker / Node | Runtime mode; normally managed by Docker. |
+| `ZALO_TG_TUI` | enabled | app | `0` disables the live TUI/dashboard and prints normal logs. |
+| `ZALO_TG_TUI_ENGINE` | auto | app | `ansi` forces the legacy TypeScript ANSI dashboard instead of the Go sidecar. |
+| `ZALO_TG_TUI_MOUSE` | enabled | app | Use `0`, `false`, `off`, `no` or `native` to keep native terminal mouse selection. |
+| `ZALO_TG_TUI_BIN` | auto-detect `bin/zalo-tg-tui` | app | Custom path to the Go TUI sidecar binary. |
+| `ZALO_TG_GLOW_BIN` | auto-detect sibling `glow`, then `PATH` | Go TUI | Custom path to the Glow renderer used for the TUI help pane. |
+| `ZALO_TG_TUI_DUMP_ON_EXIT` | enabled | app | `0` disables dumping the last TUI activity lines when the sidecar exits early. |
+| `ZALO_TG_TUI_SIDECAR` | set internally | app / Go TUI | Internal marker added when Node spawns the Go sidecar. Do not set manually. |
+| `ZALO_TG_NO_ANIMATION` | unset | app | `1` disables startup/shutdown terminal animations. |
+| `NO_COLOR` | unset | app / terminal convention | Any value disables colored dashboard output. |
+| `TERM` | terminal-provided | app / terminal convention | `TERM=dumb` disables the interactive dashboard. Usually do not set manually. |
+| `ZALO_TG_INSTALL_DIR` | `./zalo-tg` under current terminal directory | installer only | Target checkout directory for `curl | sh`; export before running `install.sh` to override. |
+| `ZALO_TG_REPO` | this GitHub repo | installer only | Repository URL used by `install.sh`; export before running the installer. |
 
 After the bot starts, send `/login` in the Telegram group or in a private chat with the bot. Scan the QR code with Zalo. When login succeeds, the bridge starts listening and creates topics as conversations appear.
 
@@ -66,9 +131,11 @@ After the bot starts, send `/login` in the Telegram group or in a private chat w
 
 | Script | Purpose |
 | --- | --- |
+| `sh install.sh` | Interactive shell installer with a polished terminal UI; prepares dependencies, runs the full `.env` wizard, builds TypeScript and optional Go TUI sidecar. |
 | `npm run dev` | Run the TypeScript app through `tsx`. |
 | `npm run dev:watch` | Run with Node watch mode. |
 | `npm run build` | Compile TypeScript into `dist/`. |
+| `npm run tui:build` | Build the optional Charmbracelet TUI sidecar into `bin/zalo-tg-tui` and the bundled Glow renderer into `bin/glow`. |
 | `npm start` | Run the compiled app. |
 | `npm test` | Run all TypeScript tests. |
 | `npm run check` | Build and run the full test suite. |
@@ -103,6 +170,7 @@ After the bot starts, send `/login` in the Telegram group or in a private chat w
 
 | Path | Role |
 | --- | --- |
+| `cmd/zalo-tg-tui/` | Optional Go TUI sidecar powered by Bubble Tea, Lip Gloss and Glow/Glamour Markdown rendering. |
 | `src/index.ts` | Boots the process, starts Telegram polling, logs into Zalo, wires reconnect and shutdown. |
 | `src/config.ts` | Reads environment variables and resolves paths. |
 | `src/telegram/bot.ts` | Creates the Telegraf bot and synchronizes Telegram commands. |
@@ -250,6 +318,42 @@ The media pipeline is intentionally defensive because Zalo and Telegram expose f
 - Zalo animated sticker sprite sheets are converted into GIF.
 - Voice/audio payloads are converted to an uploadable format when needed.
 - Temporary files are cleaned after upload attempts.
+
+## Terminal UI
+
+The default live dashboard is now Charmbracelet-aware:
+
+- if `bin/zalo-tg-tui` exists and stdout is an interactive terminal, the Node bridge starts the Go sidecar automatically;
+- the sidecar uses Bubble Tea for the event loop, keymaps and mouse handling; Bubbles for viewports, help, spinner and scroll progress; Lip Gloss for layout/style; Charmbracelet `x/ansi` for OSC52 clipboard copy; and the bundled Glow binary to render Markdown help, with Glamour fallback;
+- if the binary is missing, the terminal is non-interactive, or `ZALO_TG_TUI=0` is set, the bridge falls back to the built-in ANSI dashboard/log output;
+- set `ZALO_TG_TUI_ENGINE=ansi` to force the legacy TypeScript dashboard even when the Go sidecar exists;
+- default mouse mode supports both wheel scrolling and OpenCode-style app-level row selection/copy in the activity pane;
+- set `ZALO_TG_TUI_MOUSE=0` to keep native terminal mouse selection/scrolling, similar to OpenCode's `mouse: false` behavior. Keyboard scrolling still works inside the TUI;
+- set `ZALO_TG_TUI_BIN=/absolute/path/to/zalo-tg-tui` to use a custom sidecar path.
+
+Build the sidecar locally with:
+
+```bash
+npm run tui:build
+```
+
+Useful keys:
+
+| Key | Action |
+| --- | --- |
+| `↑` / `↓` or mouse wheel | Scroll the focused pane. Mouse wheel requires mouse capture, enabled by default. |
+| `PgUp` / `PgDn` | Page the focused pane. |
+| `g` / `G` | Jump to oldest/live activity. |
+| Drag in activity | Select visible activity rows while mouse wheel scrolling stays enabled; release auto-copies to clipboard. |
+| `y` / `Ctrl+Y` | Copy the current activity selection using local clipboard tools when available, with OSC52 fallback for compatible terminals. |
+| `Esc` | Clear the current activity selection. |
+| `s` | Native-select fallback when mouse capture is enabled: the frame freezes and terminal selection works. Press `s` again to resume live updates. |
+| `?` or `h` | Toggle the Glow-rendered help pane. |
+| `Tab` | Move focus between activity and help panes. |
+| `F1` | Expand/collapse the footer keymap. |
+| `Ctrl+C` | Copy selected activity rows; when nothing is selected, stop the bridge. |
+
+The Docker image builds and includes both the sidecar and bundled Glow renderer automatically.
 
 ## Reactions, replies and recalls
 
