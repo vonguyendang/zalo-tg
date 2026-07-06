@@ -361,6 +361,7 @@ async function handleLoginCommand(
  */
 export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
   setupSetAlias(tgBot);
+  setupSyncAliases(tgBot);
 
   /** Mutable reference so /login can swap in a new API instance. */
   let currentApi: ZaloAPI | null = initialApi;
@@ -3592,5 +3593,89 @@ export function setupSetAlias(bot: any) {
       store.accountAliasStore.set(accId, alias);
     });
     await ctx.reply(`✅ Đã đặt bí danh cho tài khoản ${accId} là: ${alias}`);
+  });
+}
+
+export function setupSyncAliases(bot: any) {
+    // @ts-ignore
+  bot.command('sync_aliases', async (ctx) => {
+    if (ctx.chat.id !== config.telegram.groupId && ctx.chat.type !== 'private') return;
+    
+    // Check if another sync is running (optional, but good practice)
+    if ((globalThis as any)._isSyncingAliases) {
+      await ctx.reply('⚠️ Tiến trình đồng bộ đang chạy, vui lòng đợi cho đến khi hoàn tất.');
+      return;
+    }
+    
+    import('../store.js').then(async (store) => {
+      const allTopics = store.store.all();
+      
+      const topicsByAccount = new Map<string, typeof allTopics>();
+      for (const entry of allTopics) {
+        if (!entry.accountId) continue;
+        if (!topicsByAccount.has(entry.accountId)) topicsByAccount.set(entry.accountId, []);
+        topicsByAccount.get(entry.accountId)!.push(entry);
+      }
+      
+      let renamedCount = 0;
+      let skippedCount = 0;
+      
+      await ctx.reply(`Đang tiến hành kiểm tra và đồng bộ tên cho ${allTopics.length} topic...`);
+      (globalThis as any)._isSyncingAliases = true;
+      
+      try {
+        const { topicName } = await import('../utils/format.js');
+        
+        for (const [accountId, topics] of topicsByAccount.entries()) {
+          const alias = store.accountAliasStore.get(accountId) || accountId;
+          const prefix = `[${alias}] `;
+          
+          for (const entry of topics) {
+            // Find the base name from store entry name, which might be just "DisplayName" or "[OldAlias] DisplayName"
+            // To be safe, if we don't know the exact base name (since `entry.name` might already have an old prefix),
+            // we should parse the old prefix out, or just rely on Zalo API. But actually `entry.name` often has the old prefix in topics.json if it was never renamed.
+            // A safer way is to check if `entry.name` in telegram starts with `prefix`. If not, we fix it.
+            // For simplicity, we assume `entry.name` in store contains the old prefix, we need to extract the real name.
+            let realName = entry.name;
+            const match = /^\\[.*?\\] (👤 |👥 )?(.*)$/.exec(entry.name);
+            if (match) {
+               realName = match[2];
+            } else {
+               // if it doesn't match the prefix format, maybe it's just the plain name.
+               const oldPrefixMatch = /^\\[.*?\\] (.*)$/.exec(entry.name);
+               if (oldPrefixMatch) realName = oldPrefixMatch[1];
+            }
+            
+            // Reconstruct the correct name
+            const nextName = prefix + topicName(realName, entry.type);
+            
+            // Because we don't have direct access to what Telegram currently stores (unless we fetch),
+            // We just attempt to edit it. If it's already the same, Telegram API will ignore or return error.
+            // To minimize API calls, if the stored name already strictly starts with our EXACT new prefix + icon, we skip.
+            if (entry.name === nextName) {
+              skippedCount++;
+              continue;
+            }
+            
+            try {
+              await ctx.telegram.editForumTopic(config.telegram.groupId, entry.topicId, { name: nextName.slice(0, 128) });
+              store.store.updateName(entry.topicId, nextName);
+              renamedCount++;
+              // Delay to avoid flood wait (e.g., 2 seconds)
+              await new Promise(resolve => setTimeout(resolve, 2000));
+            } catch (err: any) {
+              // Ignore topic deleted errors, etc.
+              skippedCount++;
+            }
+          }
+        }
+        await ctx.reply(`✅ Hoàn tất đồng bộ!\n- Đổi tên: ${renamedCount} topic\n- Bỏ qua: ${skippedCount} topic`);
+      } catch (e: any) {
+        console.error('Error in sync_aliases:', e);
+        await ctx.reply('❌ Có lỗi xảy ra trong quá trình đồng bộ: ' + e.message);
+      } finally {
+        (globalThis as any)._isSyncingAliases = false;
+      }
+    });
   });
 }

@@ -39,6 +39,7 @@ export const BOT_COMMANDS = [
   { command: 'setalias',       description: 'Đặt bí danh (alias) cho một tài khoản Zalo' },
   { command: 'whitelistbot',   description: 'Quản lý danh sách bot được phép gửi tin sang Zalo' },
   { command: 'seed',           description: 'Xem mã seed giải mã backup Zalo' },
+  { command: 'sync_aliases',   description: 'Đồng bộ tên topic theo alias hiện tại' },
 ];
 
 export const COMMAND_DETAILS: Record<string, string> = {
@@ -58,6 +59,7 @@ export const COMMAND_DETAILS: Record<string, string> = {
   'addgroup': 'Tạo một nhóm Zalo mới dựa trên topic hiện tại.\n\n<b>Ví dụ:</b>\n<code>/addgroup</code>',
   'addfriend': 'Gửi lời mời kết bạn đến người dùng trong topic hiện tại.\n\n<b>Ví dụ:</b>\n<code>/addfriend</code>',
   'friendrequests': 'Xem danh sách và duyệt (chấp nhận/từ chối) các lời mời kết bạn đang chờ.\n\n<b>Ví dụ:</b>\n<code>/friendrequests</code>',
+  'sync_aliases': 'Quét và cập nhật tên tất cả các topic trên Telegram để sử dụng bí danh (alias) mới nhất của bạn. Có tính năng delay để tránh bị Telegram chặn rate limit.\n\n<b>Ví dụ:</b>\n<code>/sync_aliases</code>',
   'joingroup': 'Tham gia một nhóm Zalo thông qua đường link mời (zalo.me/g/xxxx).\n\n<b>Tham số:</b> URL nhóm\n<b>Ví dụ:</b>\n<code>/joingroup https://zalo.me/g/abcd123</code>',
   'leavegroup': 'Rời khỏi nhóm Zalo tương ứng với topic hiện tại.\n\n<b>Ví dụ:</b>\n<code>/leavegroup</code>',
   'status': 'Xem trạng thái kết nối của bridge, thông tin uptime, bộ nhớ.\n\n<b>Ví dụ:</b>\n<code>/status</code>',
