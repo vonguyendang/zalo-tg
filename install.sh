@@ -204,19 +204,18 @@ can_prompt() {
   if [ -t 0 ]; then
     return 0
   fi
-  if [ -r /dev/tty ] && [ -t 1 ]; then
+  if [ -r /dev/tty ]; then
     return 0
   fi
   return 1
 }
 
 read_prompt() {
+  ans=""
   if [ -t 0 ]; then
     IFS= read -r ans || ans=""
   elif [ -r /dev/tty ]; then
     IFS= read -r ans < /dev/tty || ans=""
-  else
-    ans=""
   fi
 }
 
@@ -383,7 +382,7 @@ configure_env() {
 
   ENV_TG_TOKEN_DEFAULT=${TG_TOKEN:-}
   ENV_TG_GROUP_ID_DEFAULT=${TG_GROUP_ID:-}
-  if [ "$ASSUME_YES" -eq 1 ] || [ ! -t 0 ]; then
+  if ! can_prompt; then
     [ -n "$ENV_TG_TOKEN_DEFAULT" ] || ENV_TG_TOKEN_DEFAULT="1234567890:ABCDEFabcdef1234567890abcdefABCDEF123"
     [ -n "$ENV_TG_GROUP_ID_DEFAULT" ] || ENV_TG_GROUP_ID_DEFAULT="-1001234567890"
   fi
