@@ -3642,6 +3642,7 @@ export function setupSyncAliases(bot: any) {
       
       let renamedCount = 0;
       let skippedCount = 0;
+      let renameLogs: string[] = [];
       
       await ctx.reply(`Đang tiến hành kiểm tra và đồng bộ tên cho ${allTopics.length} topic...`);
       (globalThis as any)._isSyncingAliases = true;
@@ -3679,6 +3680,7 @@ export function setupSyncAliases(bot: any) {
             
             try {
               await ctx.telegram.editForumTopic(config.telegram.groupId, entry.topicId, { name: nextName.slice(0, 128) });
+              renameLogs.push(`- <code>${entry.name}</code> ➔ <b>${nextName}</b>`);
               store.store.updateName(entry.topicId, nextName);
               renamedCount++;
               // Delay to avoid flood wait (e.g., 2 seconds)
@@ -3689,7 +3691,22 @@ export function setupSyncAliases(bot: any) {
             }
           }
         }
-        await ctx.reply(`✅ Hoàn tất đồng bộ!\n- Đổi tên: ${renamedCount} topic\n- Bỏ qua: ${skippedCount} topic`);
+        if (renameLogs.length > 0) {
+          await ctx.reply(`✅ Hoàn tất đồng bộ!\n- Đổi tên: ${renamedCount} topic\n- Bỏ qua: ${skippedCount} topic\n\nChi tiết:`);
+          let currentMsg = '';
+          for (const log of renameLogs) {
+            if (currentMsg.length + log.length > 3500) {
+              await ctx.reply(currentMsg, { parse_mode: 'HTML' });
+              currentMsg = '';
+            }
+            currentMsg += log + '\n';
+          }
+          if (currentMsg) {
+            await ctx.reply(currentMsg, { parse_mode: 'HTML' });
+          }
+        } else {
+          await ctx.reply(`✅ Hoàn tất đồng bộ!\n- Đổi tên: ${renamedCount} topic\n- Bỏ qua: ${skippedCount} topic`);
+        }
       } catch (e: any) {
         console.error('Error in sync_aliases:', e);
         await ctx.reply('❌ Có lỗi xảy ra trong quá trình đồng bộ: ' + e.message);
