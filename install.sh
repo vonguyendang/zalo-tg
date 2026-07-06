@@ -78,6 +78,11 @@ Options:
   --check         Run npm run check after install
   -h, --help      Show this help
 
+Behavior:
+  The installer auto-runs default actions without waiting for y/n confirmation.
+  It still asks for .env values when a terminal is available. Use --yes to also
+  accept default .env values without prompting.
+
 Environment:
   ZALO_TG_INSTALL_DIR  Same as --dir
   ZALO_TG_REPO         Same as --repo
@@ -218,19 +223,8 @@ read_prompt() {
 confirm() {
   prompt=$1
   default=${2:-Y}
-  if ! can_prompt; then
-    printf '  %s?%s %s %s[%s]%s\n' "$MAGENTA" "$RESET" "$prompt" "$DIM" "$default" "$RESET"
-    case "$default" in
-      y|Y|yes|YES) return 0 ;;
-      *) return 1 ;;
-    esac
-  fi
-  suffix="[Y/n]"
-  [ "$default" = "N" ] && suffix="[y/N]"
-  printf '  %s?%s %s %s%s%s ' "$MAGENTA" "$RESET" "$prompt" "$DIM" "$suffix" "$RESET"
-  read_prompt
-  [ "$ans" = "" ] && ans=$default
-  case "$ans" in
+  printf '  %s◆%s %s %sauto:%s %s%s%s\n' "$MAGENTA" "$RESET" "$prompt" "$DIM" "$RESET" "$BOLD" "$default" "$RESET"
+  case "$default" in
     y|Y|yes|YES) return 0 ;;
     *) return 1 ;;
   esac
@@ -374,7 +368,7 @@ configure_env() {
   fi
 
   if [ -f .env ]; then
-    if ! confirm ".env exists. Reconfigure and overwrite it? A backup will be kept." "N"; then
+    if ! confirm ".env exists. Reconfigure and overwrite it? A backup will be kept." "Y"; then
       ok ".env exists; leaving it untouched"
       return 0
     fi
@@ -446,6 +440,16 @@ configure_env() {
   ok "created .env with full configuration"
 }
 
+has_npm_script() {
+  script_name=$1
+  node -e '
+    const fs = require("fs");
+    const name = process.argv[1];
+    const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+    process.exit(pkg.scripts && Object.prototype.hasOwnProperty.call(pkg.scripts, name) ? 0 : 1);
+  ' "$script_name" >/dev/null 2>&1
+}
+
 run_cmd() {
   title=$1
   shift
@@ -464,6 +468,22 @@ run_cmd() {
   sed -n '1,160p' "$LOG_FILE" >&2
   printf '%s\n' "${DIM}$(line "─")${RESET}" >&2
   exit 1
+}
+
+build_tui_sidecar() {
+  if has_npm_script "tui:build"; then
+    run_cmd "Build Charmbracelet TUI sidecar" npm run tui:build
+    return 0
+  fi
+
+  warn "package.json has no tui:build script; using direct Go fallback"
+  if [ ! -d cmd/zalo-tg-tui ]; then
+    warn "cmd/zalo-tg-tui not found; TUI sidecar build skipped"
+    return 0
+  fi
+  run_cmd "Create TUI output directory" mkdir -p bin
+  run_cmd "Build Go TUI sidecar" go build -o bin/zalo-tg-tui ./cmd/zalo-tg-tui
+  run_cmd "Install Glow renderer" env GOBIN="$ROOT_DIR/bin" go install github.com/charmbracelet/glow@v1.5.1
 }
 
 header
@@ -597,7 +617,7 @@ else
 fi
 
 if [ "$SKIP_TUI" -eq 0 ]; then
-  run_cmd "Build Charmbracelet TUI sidecar" npm run tui:build
+  build_tui_sidecar
 else
   warn "TUI sidecar build skipped; app will use ANSI fallback unless bin/zalo-tg-tui already exists"
 fi

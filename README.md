@@ -58,7 +58,7 @@ curl.exe -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/i
 sh install.sh
 ```
 
-The curl installer clones or updates the project in `~/zalo-tg` by default, then checks Node/npm/Go, installs npm dependencies, builds the Charmbracelet TUI sidecar when Go is available, and opens a polished `.env` setup wizard. Existing `.env` files are left untouched unless you choose to reconfigure, in which case the installer keeps a timestamped backup.
+The curl installer clones or updates the project in `~/zalo-tg` by default, then checks Node/npm/Go, installs npm dependencies, builds the Charmbracelet TUI sidecar when Go is available, and opens a polished `.env` setup wizard. It auto-runs default actions without waiting for yes/no confirmations; existing `.env` files are backed up before the wizard writes a fresh one.
 
 To choose another install directory:
 
