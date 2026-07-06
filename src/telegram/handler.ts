@@ -3690,6 +3690,13 @@ export function setupSyncAliases(bot: any) {
               // Delay 3 seconds to avoid flood wait for editForumTopic and sendMessage
               await new Promise(resolve => setTimeout(resolve, 3000));
             } catch (err: any) {
+              if (err.response?.error_code === 429) {
+                const retryAfter = err.response.parameters?.retry_after || 5;
+                console.warn(`[sync_aliases] Hit 429 Flood Wait, sleeping for ${retryAfter}s...`);
+                await ctx.reply(`⚠️ Telegram yêu cầu đợi ${retryAfter} giây trước khi tiếp tục đổi tên...`).catch(() => {});
+                await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+                // We skip this topic and let it sync next time, or we could retry. For simplicity, just skip.
+              }
               // Ignore topic deleted errors, etc.
               skippedCount++;
             }
@@ -3698,7 +3705,7 @@ export function setupSyncAliases(bot: any) {
         await ctx.reply(`✅ Hoàn tất đồng bộ!\n- Đổi tên: ${renamedCount} topic\n- Bỏ qua: ${skippedCount} topic`);
       } catch (e: any) {
         console.error('Error in sync_aliases:', e);
-        await ctx.reply('❌ Có lỗi xảy ra trong quá trình đồng bộ: ' + e.message);
+        await ctx.reply('❌ Có lỗi xảy ra trong quá trình đồng bộ: ' + e.message).catch(() => {});
       } finally {
         (globalThis as any)._isSyncingAliases = false;
       }
