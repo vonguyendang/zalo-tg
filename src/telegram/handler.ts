@@ -3680,7 +3680,7 @@ export function setupSyncAliases(bot: any) {
             
             try {
               await ctx.telegram.editForumTopic(config.telegram.groupId, entry.topicId, { name: nextName.slice(0, 128) });
-              renameLogs.push(`- <code>${entry.name}</code> ➔ <b>${nextName}</b>`);
+              renameLogs.push(`- <code>${escapeHtml(entry.name)}</code> ➔ <b>${escapeHtml(nextName)}</b>`);
               store.store.updateName(entry.topicId, nextName);
               renamedCount++;
               // Delay to avoid flood wait (e.g., 2 seconds)
