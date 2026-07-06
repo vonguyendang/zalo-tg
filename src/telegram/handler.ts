@@ -3633,17 +3633,14 @@ export function setupSyncAliases(bot: any) {
           for (const entry of topics) {
             // Find the base name from store entry name, which might be just "DisplayName" or "[OldAlias] DisplayName"
             // To be safe, if we don't know the exact base name (since `entry.name` might already have an old prefix),
-            // we should parse the old prefix out, or just rely on Zalo API. But actually `entry.name` often has the old prefix in topics.json if it was never renamed.
-            // A safer way is to check if `entry.name` in telegram starts with `prefix`. If not, we fix it.
-            // For simplicity, we assume `entry.name` in store contains the old prefix, we need to extract the real name.
             let realName = entry.name;
-            const match = /^\\[.*?\\] (👤 |👥 )?(.*)$/.exec(entry.name);
-            if (match) {
-               realName = match[2];
-            } else {
-               // if it doesn't match the prefix format, maybe it's just the plain name.
-               const oldPrefixMatch = /^\\[.*?\\] (.*)$/.exec(entry.name);
-               if (oldPrefixMatch) realName = oldPrefixMatch[1];
+            while (true) {
+              const match = /^\[.*?\]\s*(👤 |👥 )?\s*(.*)$/.exec(realName);
+              if (match) {
+                realName = match[2];
+              } else {
+                break;
+              }
             }
             
             // Reconstruct the correct name
