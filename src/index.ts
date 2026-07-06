@@ -10,7 +10,7 @@ import { tgBot, syncTelegramCommands } from './telegram/bot.js';
 import { setupTelegramHandler } from './telegram/handler.js';
 import { config } from './config.js';
 import { startUpdateChecker } from './updater.js';
-import { store, accountAliasStore } from './store.js';
+import { store, accountAliasStore, accountNameStore } from './store.js';
 import { syncGroupHistory } from './zalo/historySync.js';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import path from 'path';
@@ -328,9 +328,9 @@ async function main(): Promise<void> {
                fetchedName = profile?.displayName?.trim() || profile?.zaloName?.trim();
              }
            }
-           const accountName = fetchedName || accountAliasStore.get(accountId) || 'Zalo';
-           if (fetchedName && accountName !== accountAliasStore.get(accountId)) {
-             accountAliasStore.set(accountId, fetchedName);
+           const accountName = fetchedName || accountAliasStore.get(accountId) || accountNameStore.get(accountId) || 'Zalo';
+           if (fetchedName) {
+             accountNameStore.set(accountId, fetchedName);
            }
            
            if (apis.size === 1) {

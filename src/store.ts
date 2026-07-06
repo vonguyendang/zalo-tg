@@ -28,6 +28,7 @@ interface StoreData {
   topics: Record<string, TopicEntry>;
   zaloIndex: Record<string, number>;
   accountAliases?: Record<string, string>;
+  accountNames?: Record<string, string>;
   whitelistedBots?: number[];
 }
 
@@ -670,6 +671,17 @@ export const accountAliasStore = {
       delete _data.accountAliases[accountId];
       persist(_data);
     }
+  }
+};
+
+export const accountNameStore = {
+  get(accountId: string): string | undefined {
+    return _data.accountNames ? _data.accountNames[accountId] : undefined;
+  },
+  set(accountId: string, name: string): void {
+    if (!_data.accountNames) _data.accountNames = {};
+    _data.accountNames[accountId] = name;
+    persist(_data);
   }
 };
 

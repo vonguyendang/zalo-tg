@@ -3650,7 +3650,7 @@ export function setupSyncAliases(bot: any) {
         const { topicName } = await import('../utils/format.js');
         
         for (const [accountId, topics] of topicsByAccount.entries()) {
-          const alias = store.accountAliasStore.get(accountId) || accountId;
+          const alias = store.accountAliasStore.get(accountId) || store.accountNameStore.get(accountId) || accountId;
           const prefix = `[${alias}] `;
           
           for (const entry of topics) {
