@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+bin/
 
 # Environment & secrets — KHÔNG commit các file này
 .env

@@ -1,8 +1,17 @@
+import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import type { Writable } from 'node:stream';
+import { fileURLToPath } from 'node:url';
+
 const interactive = Boolean(
   process.stdout.isTTY
   && !process.env.NO_COLOR
   && process.env.TERM !== 'dumb',
 );
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = path.resolve(__dirname, '../..');
 
 const ansi = {
   reset: '\x1b[0m',
@@ -92,6 +101,9 @@ let inputActive = false;
 let scrollOffset = 0;
 let lastActivityHeight = 5;
 let selectionMode = false;
+let charmTuiProcess: ChildProcess | null = null;
+let charmTuiStream: Writable | null = null;
+let charmTuiActive = false;
 
 function paint(text: string, color: string, bold = false): string {
   if (!interactive) return text;
@@ -141,6 +153,117 @@ function uptime(): string {
 function canUseDashboard(): boolean {
   return interactive
     && process.env.ZALO_TG_TUI !== '0';
+}
+
+function canUseCharmTui(): boolean {
+  return canUseDashboard()
+    && process.env.ZALO_TG_TUI_ENGINE !== 'ansi';
+}
+
+function tuiMouseCaptureEnabled(): boolean {
+  const value = process.env.ZALO_TG_TUI_MOUSE?.trim().toLowerCase();
+  return !['0', 'false', 'off', 'no', 'native'].includes(value ?? '');
+}
+
+function tuiBinaryName(): string {
+  return process.platform === 'win32' ? 'zalo-tg-tui.exe' : 'zalo-tg-tui';
+}
+
+function resolveCharmTuiBinary(): string | null {
+  const explicit = process.env.ZALO_TG_TUI_BIN?.trim();
+  const candidates = [
+    explicit || undefined,
+    path.resolve(process.cwd(), 'bin', tuiBinaryName()),
+    path.resolve(PROJECT_ROOT, 'bin', tuiBinaryName()),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function tuiState(): ServiceState {
+  return {
+    ...state,
+    events: state.events.slice(-200),
+  };
+}
+
+function sendCharmTui(payload: Record<string, unknown>): boolean {
+  if (!charmTuiActive || !charmTuiStream || charmTuiStream.destroyed || !charmTuiStream.writable) {
+    return false;
+  }
+  try {
+    charmTuiStream.write(`${JSON.stringify(payload)}\n`);
+    return true;
+  } catch {
+    charmTuiActive = false;
+    return false;
+  }
+}
+
+function stopCharmTui(): void {
+  if (!charmTuiActive && !charmTuiProcess) return;
+  sendCharmTui({ type: 'quit', state: tuiState() });
+  try { charmTuiStream?.end(); } catch { /* ignore */ }
+  charmTuiActive = false;
+  charmTuiStream = null;
+  charmTuiProcess = null;
+}
+
+function shouldDumpCharmTuiExit(): boolean {
+  if (process.env.ZALO_TG_TUI_DUMP_ON_EXIT === '0') return false;
+  if (process.uptime() < 20) return true;
+  return state.events.slice(-8).some(event => event.tone === 'error');
+}
+
+function dumpCharmTuiExit(reason: string): void {
+  if (!shouldDumpCharmTuiExit()) return;
+  nativeConsole.warn('');
+  nativeConsole.warn(`${paint('▲', ansi.yellow, true)} ${paint('Bridge stopped', ansi.yellow, true)} ${paint(reason, ansi.gray)}`);
+  for (const event of state.events.slice(-8)) {
+    streamEvent(event, event.tone === 'error' ? 'error' : event.tone === 'warn' ? 'warn' : 'log');
+  }
+}
+
+function startCharmTui(): boolean {
+  if (!canUseCharmTui()) return false;
+  const binary = resolveCharmTuiBinary();
+  if (!binary) return false;
+  try {
+    const child = spawn(binary, [], {
+      stdio: ['inherit', 'inherit', 'inherit', 'pipe'],
+      env: {
+        ...process.env,
+        ZALO_TG_TUI_SIDECAR: '1',
+      },
+    });
+    const eventStream = child.stdio[3] as Writable | undefined;
+    if (!eventStream) {
+      child.kill();
+      return false;
+    }
+    charmTuiProcess = child;
+    charmTuiStream = eventStream;
+    charmTuiActive = true;
+    child.once('exit', () => {
+      charmTuiActive = false;
+      charmTuiStream = null;
+      charmTuiProcess = null;
+    });
+    child.once('error', () => {
+      charmTuiActive = false;
+      charmTuiStream = null;
+      charmTuiProcess = null;
+    });
+    sendCharmTui({ type: 'snapshot', state: tuiState() });
+    return true;
+  } catch {
+    charmTuiActive = false;
+    charmTuiStream = null;
+    charmTuiProcess = null;
+    return false;
+  }
 }
 
 function fit(text: string, width: number): string {
@@ -311,12 +434,12 @@ function scrollActivity(delta: number): void {
 function setSelectionMode(enabled: boolean): void {
   selectionMode = enabled;
   if (enabled) {
-    process.stdout.write(ansi.mouseOff);
+    if (tuiMouseCaptureEnabled()) process.stdout.write(ansi.mouseOff);
     // Render the SELECT indicator once, then freeze the screen so incoming
     // events cannot invalidate Terminal.app's native text selection.
     renderDashboard(true);
   } else {
-    process.stdout.write(ansi.mouseOn);
+    if (tuiMouseCaptureEnabled()) process.stdout.write(ansi.mouseOn);
     renderDashboard(true);
   }
 }
@@ -373,7 +496,7 @@ function setupInteractiveInput(): void {
   process.stdin.setRawMode(true);
   process.stdin.resume();
   process.stdin.on('data', handleInput);
-  process.stdout.write(`${ansi.altScreen}${ansi.mouseOn}${ansi.hideCursor}`);
+  process.stdout.write(`${ansi.altScreen}${tuiMouseCaptureEnabled() ? ansi.mouseOn : ''}${ansi.hideCursor}`);
 }
 
 function cleanupInteractiveInput(): void {
@@ -491,7 +614,11 @@ function renderDashboard(force = false): void {
     );
   }
   lines.push(`${indent}${paint(`╰${'─'.repeat(inner)}╯`, ansi.dark)}`);
-  const modeLabel = selectionMode ? 'SELECT · drag + Cmd+C · S resume' : 'SCROLL · wheel/trackpad · S select';
+  const modeLabel = selectionMode
+    ? 'SELECT · drag + Cmd+C · S resume'
+    : tuiMouseCaptureEnabled()
+      ? 'SCROLL · wheel/trackpad · S select'
+      : 'NATIVE MOUSE · ↑↓ scroll';
   const controls = width >= 112
     ? `${modeLabel}  ·  PgUp/PgDn  ·  Home/End  ·  Ctrl+C stop  ·  up ${uptime()}`
     : width >= 78
@@ -575,6 +702,7 @@ function addEvent(label: string, message: string, tone: Tone, method: ConsoleMet
   if (scrollOffset > 0) scrollOffset++;
   state.events.push(event);
   if (state.events.length > 200) state.events.splice(0, state.events.length - 200);
+  if (charmTuiActive && sendCharmTui({ type: 'event', event, state: tuiState() })) return;
   if (dashboardActive && canUseDashboard()) scheduleRender();
   else streamEvent(event, method, rest);
 }
@@ -608,6 +736,9 @@ export const terminal = {
   async intro(version: string): Promise<void> {
     state.version = version;
     dashboardActive = canUseDashboard();
+    if (dashboardActive && startCharmTui()) {
+      return;
+    }
     if (dashboardActive) {
       setupInteractiveInput();
       await playLoadingAnimation();
@@ -631,6 +762,7 @@ export const terminal = {
 
   section(title: string): void {
     state.phase = title.toUpperCase();
+    if (charmTuiActive && sendCharmTui({ type: 'section', state: tuiState() })) return;
     scheduleRender();
   },
 
@@ -642,6 +774,14 @@ export const terminal = {
     state.bridge = 'stopping';
     state.phase = 'SHUTDOWN';
     addEvent('LIFECYCLE', reason, 'warn');
+    if (charmTuiActive) {
+      sendCharmTui({ type: 'shutdown', reason, state: tuiState() });
+      await wait(1100);
+      stopCharmTui();
+      await wait(120);
+      dumpCharmTuiExit(reason);
+      return;
+    }
     await playShutdownAnimation(reason);
   },
 };
@@ -650,6 +790,7 @@ if (interactive) {
   process.stdout.on('resize', scheduleRender);
   process.once('exit', () => {
     if (dashboardTimer) clearInterval(dashboardTimer);
+    stopCharmTui();
     cleanupInteractiveInput();
     if (!inputActive) process.stdout.write(ansi.showCursor);
   });
