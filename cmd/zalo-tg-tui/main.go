@@ -72,6 +72,7 @@ type model struct {
 	state   serviceState
 	width   int
 	height  int
+	frame   int
 
 	activity viewport.Model
 	docs     viewport.Model
@@ -153,18 +154,24 @@ func (k keyMap) FullHelp() [][]key.Binding {
 }
 
 type palette struct {
-	ink      lipgloss.Color
-	muted    lipgloss.Color
-	panel    lipgloss.Color
-	border   lipgloss.Color
-	magenta  lipgloss.Color
-	cyan     lipgloss.Color
-	green    lipgloss.Color
-	yellow   lipgloss.Color
-	red      lipgloss.Color
-	blue     lipgloss.Color
-	shadow   lipgloss.Color
-	terminal lipgloss.AdaptiveColor
+	ink        lipgloss.Color
+	muted      lipgloss.Color
+	panel      lipgloss.Color
+	surface    lipgloss.Color
+	surfaceAlt lipgloss.Color
+	elevated   lipgloss.Color
+	border     lipgloss.Color
+	selection  lipgloss.Color
+	magenta    lipgloss.Color
+	cyan       lipgloss.Color
+	green      lipgloss.Color
+	yellow     lipgloss.Color
+	red        lipgloss.Color
+	blue       lipgloss.Color
+	orange     lipgloss.Color
+	violet     lipgloss.Color
+	shadow     lipgloss.Color
+	terminal   lipgloss.AdaptiveColor
 }
 
 type designSystem struct {
@@ -185,18 +192,24 @@ type designSystem struct {
 
 func newDesignSystem() designSystem {
 	p := palette{
-		ink:      lipgloss.Color("#DADDE3"),
-		muted:    lipgloss.Color("#6E7681"),
-		panel:    lipgloss.Color("#0F1115"),
-		border:   lipgloss.Color("#30363D"),
-		magenta:  lipgloss.Color("#BC8CFF"),
-		cyan:     lipgloss.Color("#58A6FF"),
-		green:    lipgloss.Color("#3FB950"),
-		yellow:   lipgloss.Color("#D29922"),
-		red:      lipgloss.Color("#F85149"),
-		blue:     lipgloss.Color("#79C0FF"),
-		shadow:   lipgloss.Color("#010409"),
-		terminal: lipgloss.AdaptiveColor{Light: "#24292F", Dark: "#DADDE3"},
+		ink:        lipgloss.Color("#F4F7FB"),
+		muted:      lipgloss.Color("#7C8797"),
+		panel:      lipgloss.Color("#0B0F14"),
+		surface:    lipgloss.Color("#121821"),
+		surfaceAlt: lipgloss.Color("#17202B"),
+		elevated:   lipgloss.Color("#1C2633"),
+		border:     lipgloss.Color("#2B3645"),
+		selection:  lipgloss.Color("#233449"),
+		magenta:    lipgloss.Color("#E879F9"),
+		cyan:       lipgloss.Color("#22D3EE"),
+		green:      lipgloss.Color("#34D399"),
+		yellow:     lipgloss.Color("#FBBF24"),
+		red:        lipgloss.Color("#FB7185"),
+		blue:       lipgloss.Color("#60A5FA"),
+		orange:     lipgloss.Color("#FB923C"),
+		violet:     lipgloss.Color("#A78BFA"),
+		shadow:     lipgloss.Color("#05070A"),
+		terminal:   lipgloss.AdaptiveColor{Light: "#1F2937", Dark: "#F4F7FB"},
 	}
 	return designSystem{
 		palette: p,
@@ -205,17 +218,21 @@ func newDesignSystem() designSystem {
 			Padding(0, 1),
 		topBar: lipgloss.NewStyle().
 			Foreground(p.ink).
+			Background(p.surfaceAlt).
 			Padding(0, 0),
 		status: lipgloss.NewStyle().
 			Foreground(p.muted).
+			Background(p.surface).
 			Padding(0, 0),
 		panel: lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
+			Border(lipgloss.RoundedBorder()).
 			BorderForeground(p.border).
+			Foreground(p.ink).
 			Padding(0, 1),
 		active: lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
+			Border(lipgloss.RoundedBorder()).
 			BorderForeground(p.cyan).
+			Foreground(p.ink).
 			Padding(0, 1),
 		card: lipgloss.NewStyle().
 			Foreground(p.ink).
@@ -230,7 +247,8 @@ func newDesignSystem() designSystem {
 			Bold(true).
 			Padding(0, 1),
 		brand: lipgloss.NewStyle().
-			Bold(true),
+			Bold(true).
+			Foreground(p.ink),
 		muted: lipgloss.NewStyle().
 			Foreground(p.muted),
 	}
@@ -545,6 +563,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
+		m.frame++
+		if len(m.state.Events) == 0 {
+			m.layout()
+		}
 		return m, cmd
 
 	case clearFlashMsg:
@@ -820,41 +842,59 @@ func (m model) renderFrame() string {
 }
 
 func (m model) renderTopBar(width int) string {
+	online := m.state.Bridge == "online" && m.state.Telegram == "online" && m.state.Zalo == "online"
 	pulse := m.spinner.View()
-	if m.state.Bridge == "online" && m.state.Telegram == "online" && m.state.Zalo == "online" {
+	if online {
 		pulse = "●"
 	}
-	left := lipgloss.NewStyle().Foreground(statusColor(m.state.Bridge)).Render(pulse) +
-		" " + ui.brand.Render("zalo-tg") + ui.muted.Render(" / bridge")
 	phase := strings.ToLower(defaultString(m.state.Phase, "startup"))
+	left := lipgloss.NewStyle().Foreground(statusColor(m.state.Bridge)).Render(pulse) +
+		" " +
+		lipgloss.NewStyle().Foreground(ui.palette.magenta).Bold(true).Render("zalo") +
+		ui.muted.Render(" ⇄ ") +
+		lipgloss.NewStyle().Foreground(ui.palette.cyan).Bold(true).Render("telegram")
+	if width >= 74 {
+		left += " " + m.signalRail(clamp(width/7, 10, 18), online)
+	}
+	if width >= 66 {
+		left += " " + phaseBadge(phase)
+	}
+
 	right := ui.muted.Render(fmt.Sprintf("v%s  %s  up %s", defaultString(m.state.Version, "1.0.0"), time.Now().Format("15:04:05"), uptime()))
-	if width < 96 {
+	if width < 104 {
+		right = ui.muted.Render(fmt.Sprintf("%s  up %s", time.Now().Format("15:04:05"), uptime()))
+	}
+	if width < 78 {
 		right = ui.muted.Render("up " + uptime())
 	}
-	return ui.topBar.Width(width).Render(alignLine(width, left+ui.muted.Render("  "+phase), right))
+	if width < 62 {
+		right = ""
+	}
+	return ui.topBar.Width(width).Render(fillLine(alignLine(width, left, right), width))
 }
 
 func (m model) renderStatusBar(width int) string {
-	separator := ui.muted.Render("   ")
+	compact := width < 82
+	separator := ui.muted.Render(" ")
 	left := lipgloss.JoinHorizontal(lipgloss.Left,
-		m.statusSegment("bridge", m.state.Bridge),
+		m.statusSegment("bridge", m.state.Bridge, compact),
 		separator,
-		m.statusSegment("telegram", m.state.Telegram),
+		m.statusSegment("telegram", m.state.Telegram, compact),
 		separator,
-		m.statusSegment("zalo", m.state.Zalo),
+		m.statusSegment("zalo", m.state.Zalo, compact),
 	)
-	rightParts := []string{fmt.Sprintf("%d topics", m.state.Topics), fmt.Sprintf("%d users", m.state.Users)}
+	rightParts := []string{m.activitySparkline(10), fmt.Sprintf("%d topics", m.state.Topics), fmt.Sprintf("%d users", m.state.Users)}
 	if m.activity.TotalLineCount() > m.activity.Height {
 		rightParts = append([]string{m.scrollMeter(12)}, rightParts...)
 	}
 	right := ui.muted.Render(strings.Join(rightParts, "  "))
-	if width < 92 {
+	if width < 98 || lipgloss.Width(left)+lipgloss.Width(right)+2 > width {
 		right = ""
 	}
-	return ui.status.Width(width).Render(alignLine(width, left, right))
+	return ui.status.Width(width).Render(fillLine(alignLine(width, left, right), width))
 }
 
-func (m model) statusSegment(name, value string) string {
+func (m model) statusSegment(name, value string, compact bool) string {
 	color := statusColor(value)
 	dotText := "●"
 	if strings.ToLower(value) != "online" && strings.ToLower(value) != "error" {
@@ -863,10 +903,20 @@ func (m model) statusSegment(name, value string) string {
 			dotText = "•"
 		}
 	}
-	dot := lipgloss.NewStyle().Foreground(color).Render(dotText)
-	label := ui.muted.Render(name)
-	state := lipgloss.NewStyle().Foreground(color).Render(statusLabel(value))
-	return dot + " " + label + " " + state
+	label := name
+	if compact {
+		label = compactServiceName(name)
+	}
+	state := statusLabel(value)
+	if compact {
+		state = compactStatusLabel(value)
+	}
+	text := fmt.Sprintf(" %s %s %s ", dotText, label, state)
+	return lipgloss.NewStyle().
+		Foreground(color).
+		Background(ui.palette.elevated).
+		Bold(strings.ToLower(value) == "online" || strings.ToLower(value) == "error").
+		Render(text)
 }
 
 func (m model) scrollMeter(width int) string {
@@ -880,7 +930,7 @@ func (m model) panel(title string, p pane, width, height int, content string) st
 	if m.focus == p {
 		style = ui.active
 	}
-	titleStyle := lipgloss.NewStyle().Foreground(ui.palette.muted)
+	titleStyle := lipgloss.NewStyle().Foreground(ui.palette.muted).Bold(true)
 	if m.focus == p {
 		titleStyle = titleStyle.Foreground(ui.palette.ink)
 	}
@@ -893,10 +943,27 @@ func (m model) panel(title string, p pane, width, height int, content string) st
 	if m.quitting {
 		titleStyle = titleStyle.Foreground(ui.palette.yellow)
 	}
-	header := titleStyle.Render(title)
-	if p == paneActivity && !m.activity.AtBottom() {
-		header += ui.muted.Render(fmt.Sprintf("  history %.0f%%", m.activity.ScrollPercent()*100))
+	innerWidth := max(1, width-style.GetHorizontalFrameSize())
+	headerWidth := max(1, innerWidth-2)
+	dot := lipgloss.NewStyle().Foreground(ui.palette.border).Render("●")
+	if m.focus == p {
+		dot = lipgloss.NewStyle().Foreground(ui.palette.cyan).Render("●")
 	}
+	left := dot + " " + titleStyle.Render(title)
+	right := ""
+	if p == paneActivity {
+		mode := lipgloss.NewStyle().Foreground(ui.palette.green).Render("live")
+		if !m.activity.AtBottom() {
+			mode = lipgloss.NewStyle().Foreground(ui.palette.yellow).Render(fmt.Sprintf("history %.0f%%", m.activity.ScrollPercent()*100))
+		}
+		right = ui.muted.Render(fmt.Sprintf("%d events  ", len(m.state.Events))) + mode
+	} else {
+		right = ui.muted.Render("glow/glamour")
+	}
+	if lipgloss.Width(left)+lipgloss.Width(right)+2 > headerWidth {
+		right = ""
+	}
+	header := alignLine(headerWidth, left, right)
 	return renderBoxHeight(style, width, height, header+"\n"+content)
 }
 
@@ -950,10 +1017,7 @@ func (m model) renderFooter(width int) string {
 
 func (m model) buildActivityRows(width int) []activityRow {
 	if len(m.state.Events) == 0 {
-		return []activityRow{
-			{rendered: ui.muted.Render("Waiting for events."), plain: "Waiting for events."},
-			{rendered: ui.muted.Render("Press ? for keys."), plain: "Press ? for keys."},
-		}
+		return m.emptyActivityRows(width)
 	}
 
 	rows := make([]activityRow, 0, len(m.state.Events)+2)
@@ -983,7 +1047,7 @@ func (m model) buildActivityRows(width int) []activityRow {
 			plain := truncate(rows[i].plain, max(1, width-4))
 			rows[i].rendered = lipgloss.NewStyle().
 				Foreground(ui.palette.ink).
-				Background(lipgloss.Color("#1F2937")).
+				Background(ui.palette.selection).
 				Render(plain)
 		}
 	}
@@ -998,21 +1062,148 @@ func renderActivityRows(rows []activityRow) string {
 	return strings.Join(lines, "\n")
 }
 
+func (m model) emptyActivityRows(width int) []activityRow {
+	title := "waiting for bridge activity"
+	if width < 40 {
+		title = "waiting for events"
+	}
+	detail := "new Zalo and Telegram events will appear here"
+	if width < 52 {
+		detail = "new events appear here"
+	}
+	railWidth := clamp(width-2, 8, 30)
+	rail := m.signalRail(railWidth, false)
+	return []activityRow{
+		{rendered: lipgloss.NewStyle().Foreground(ui.palette.cyan).Render(rail), plain: title},
+		{rendered: lipgloss.NewStyle().Foreground(ui.palette.ink).Bold(true).Render(truncate(title, width)), plain: title},
+		{rendered: ui.muted.Render(truncate(detail, width)), plain: detail},
+		{rendered: ui.muted.Render(truncate("press ? for the Glow help pane", width)), plain: "press ? for the Glow help pane"},
+	}
+}
+
+func (m model) signalRail(width int, online bool) string {
+	if width <= 0 {
+		return ""
+	}
+	head := m.frame % width
+	parts := make([]string, 0, width)
+	for i := 0; i < width; i++ {
+		distance := circularDistance(i, head, width)
+		character := "─"
+		color := ui.palette.border
+		switch distance {
+		case 0:
+			character = "●"
+			color = ui.palette.cyan
+			if online {
+				color = ui.palette.green
+			}
+		case 1:
+			character = "━"
+			color = ui.palette.blue
+		case 2:
+			character = "─"
+			color = ui.palette.violet
+		default:
+			if !online && (i+m.frame)%5 == 0 {
+				character = "·"
+				color = ui.palette.muted
+			}
+		}
+		parts = append(parts, lipgloss.NewStyle().Foreground(color).Render(character))
+	}
+	return strings.Join(parts, "")
+}
+
+func phaseBadge(phase string) string {
+	color := ui.palette.blue
+	switch {
+	case strings.Contains(phase, "live"):
+		color = ui.palette.green
+	case strings.Contains(phase, "start"):
+		color = ui.palette.cyan
+	case strings.Contains(phase, "shutdown"), strings.Contains(phase, "stop"):
+		color = ui.palette.yellow
+	case strings.Contains(phase, "error"):
+		color = ui.palette.red
+	}
+	return lipgloss.NewStyle().
+		Foreground(ui.palette.panel).
+		Background(color).
+		Bold(true).
+		Render(" " + strings.ToUpper(truncate(phase, 16)) + " ")
+}
+
+func (m model) activitySparkline(width int) string {
+	if width <= 0 {
+		return ""
+	}
+	events := m.state.Events
+	if len(events) == 0 {
+		return ui.muted.Render(strings.Repeat("·", width))
+	}
+	start := max(0, len(events)-width)
+	cells := make([]string, 0, width)
+	for i := start; i < len(events); i++ {
+		character, color := sparkCell(events[i].Tone)
+		cells = append(cells, lipgloss.NewStyle().Foreground(color).Render(character))
+	}
+	for len(cells) < width {
+		cells = append([]string{ui.muted.Render("·")}, cells...)
+	}
+	return strings.Join(cells, "")
+}
+
+func sparkCell(tone string) (string, lipgloss.Color) {
+	switch tone {
+	case "success":
+		return "▆", ui.palette.green
+	case "info":
+		return "▅", ui.palette.cyan
+	case "warn":
+		return "▇", ui.palette.yellow
+	case "error":
+		return "█", ui.palette.red
+	default:
+		return "▂", ui.palette.muted
+	}
+}
+
 func renderEvent(event activityEvent, width int) string {
 	level, tone := toneLevel(event.Tone)
+	glyph, glyphColor := toneGlyph(event.Tone)
 	timePart := lipgloss.NewStyle().Foreground(ui.palette.muted).Render(event.Time)
-	levelPart := lipgloss.NewStyle().Foreground(tone).Render(padRight(level, 5))
-	labelPart := lipgloss.NewStyle().Foreground(labelColor(event.Label)).Render(padRight(truncate(event.Label, 14), 14))
-	// Keep this conservative. A TUI log line that wraps is much uglier than a
-	// slightly earlier ellipsis, especially once ANSI styling and box padding
-	// enter the terminal renderer.
-	msgWidth := max(8, width-lipgloss.Width(event.Time)-2-5-2-14-8)
 	msgStyle := lipgloss.NewStyle().Foreground(ui.palette.ink)
 	if event.Tone == "muted" {
 		msgStyle = msgStyle.Foreground(ui.palette.muted)
 	}
 	message := strings.ReplaceAll(event.Message, "\n", " ↵ ")
-	return fmt.Sprintf("%s  %s  %s  %s", timePart, levelPart, labelPart, msgStyle.Render(truncate(message, msgWidth)))
+
+	if width < 44 {
+		prefixWidth := lipgloss.Width(event.Time) + 3
+		msgWidth := max(1, width-prefixWidth)
+		return fmt.Sprintf("%s %s %s",
+			timePart,
+			lipgloss.NewStyle().Foreground(glyphColor).Render(glyph),
+			msgStyle.Render(truncate(message, msgWidth)),
+		)
+	}
+
+	labelWidth := clamp(width/5, 9, 14)
+	levelPart := lipgloss.NewStyle().
+		Foreground(tone).
+		Background(ui.palette.surfaceAlt).
+		Render(" " + padRight(level, 5) + " ")
+	labelPart := lipgloss.NewStyle().Foreground(labelColor(event.Label)).Render(padRight(truncate(event.Label, labelWidth), labelWidth))
+	prefixWidth := lipgloss.Width(event.Time) + 2 + 1 + 2 + 7 + 2 + labelWidth + 2
+	msgWidth := max(1, width-prefixWidth)
+	return fmt.Sprintf("%s  %s  %s  %s  %s",
+		timePart,
+		lipgloss.NewStyle().Foreground(glyphColor).Render(glyph),
+		levelPart,
+		labelPart,
+		msgStyle.Render(truncate(message, msgWidth)),
+	)
 }
 
 func plainEvent(event activityEvent) string {
@@ -1201,6 +1392,32 @@ func statusLabel(value string) string {
 	}
 }
 
+func compactServiceName(name string) string {
+	switch strings.ToLower(name) {
+	case "bridge":
+		return "br"
+	case "telegram":
+		return "tg"
+	case "zalo":
+		return "za"
+	default:
+		return name
+	}
+}
+
+func compactStatusLabel(value string) string {
+	switch strings.ToLower(value) {
+	case "online":
+		return "up"
+	case "error":
+		return "err"
+	case "stopping":
+		return "stop"
+	default:
+		return "sync"
+	}
+}
+
 func statusColor(value string) lipgloss.Color {
 	switch strings.ToLower(value) {
 	case "online":
@@ -1248,13 +1465,13 @@ func labelColor(label string) lipgloss.Color {
 	lower := strings.ToLower(label)
 	switch {
 	case strings.Contains(lower, "zalo"):
-		return ui.palette.ink
+		return ui.palette.magenta
 	case strings.Contains(lower, "telegram"), strings.Contains(lower, "tg"):
-		return ui.palette.ink
+		return ui.palette.cyan
 	case strings.Contains(lower, "bridge"):
 		return ui.palette.green
 	case strings.Contains(lower, "cache"), strings.Contains(lower, "topic"):
-		return ui.palette.yellow
+		return ui.palette.orange
 	case strings.Contains(lower, "system"), strings.Contains(lower, "runtime"):
 		return ui.palette.blue
 	default:
@@ -1326,6 +1543,17 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func circularDistance(a, b, size int) int {
+	if size <= 0 {
+		return 0
+	}
+	distance := a - b
+	if distance < 0 {
+		distance = -distance
+	}
+	return min(distance, size-distance)
 }
 
 func clamp(value, low, high int) int {

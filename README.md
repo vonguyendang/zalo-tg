@@ -58,7 +58,7 @@ curl.exe -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/i
 sh install.sh
 ```
 
-The curl installer clones or updates the project in `~/zalo-tg` by default, then checks Node/npm/Go, installs npm dependencies, builds the Charmbracelet TUI sidecar when Go is available, creates `.env` from `.env.example` only when `.env` is missing, and leaves existing configuration untouched.
+The curl installer clones or updates the project in `~/zalo-tg` by default, then checks Node/npm/Go, installs npm dependencies, builds the Charmbracelet TUI sidecar when Go is available, and opens a polished `.env` setup wizard. Existing `.env` files are left untouched unless you choose to reconfigure, in which case the installer keeps a timestamped backup.
 
 To choose another install directory:
 
@@ -86,24 +86,44 @@ cp .env.example .env # if your checkout contains one; otherwise create .env manu
 npm run dev
 ```
 
-Minimum `.env`:
+Required `.env` keys:
 
 ```env
 TG_TOKEN=123456:telegram-bot-token
 TG_GROUP_ID=-1001234567890
-
-# Optional paths
-DATA_DIR=./data
-ZALO_CREDENTIALS_PATH=./credentials.json
-
-# Optional Telegram Local Bot API
-LOCAL_BOT_API=0
-TG_LOCAL_SERVER=http://127.0.0.1:8081
-
-# Optional Zalo behavior
-ZALO_SKIP_MUTED_GROUPS=0
-ZALO_MUTE_SILENT=1
 ```
+
+Copy [.env.example](.env.example) for the full template. Complete configuration reference:
+
+| Variable | Default / example | Used by | Purpose |
+| --- | --- | --- | --- |
+| `TG_TOKEN` | required | app | Telegram bot token from @BotFather. |
+| `TG_GROUP_ID` | required, e.g. `-1001234567890` | app | Telegram supergroup/forum ID. Must be negative; bot must be admin and Topics must be enabled. |
+| `DATA_DIR` | `./data` | app | Persistent store directory for topics, message maps, user cache, polls and auto-reply state. |
+| `ZALO_CREDENTIALS_PATH` | `./credentials.json` | app | Zalo login credentials written after QR login. Keep private. |
+| `ZALO_SKIP_MUTED_GROUPS` | `0` | app | `1` skips messages from muted Zalo groups entirely. |
+| `ZALO_MUTE_SILENT` | `1` | app | `1` mirrors Zalo muted threads as silent Telegram messages; `0` always notifies. |
+| `LOCAL_BOT_API` | `0` | app | `1` sends Telegram Bot API calls to `TG_LOCAL_SERVER`; `0` uses official `api.telegram.org`. |
+| `TG_LOCAL_SERVER` | `http://127.0.0.1:8081` | app / Compose override | Local Bot API endpoint. Required only when `LOCAL_BOT_API=1`; Compose overrides it to `http://telegram-bot-api:8081`. |
+| `TG_API_ID` | empty | Docker Compose | Telegram API ID for the `telegram-bot-api` container; get it from my.telegram.org. |
+| `TG_API_HASH` | empty | Docker Compose | Telegram API hash for the `telegram-bot-api` container. |
+| `TG_LOCAL_PORT` | `8081` | Docker Compose | Host port exposed by the local Bot API service. |
+| `TGBOTAPI_DATA_DIR` | `./data/bot-api` | `start-local-api.sh` | Data/log directory for a locally installed `telegram-bot-api` binary. Docker Compose does not use this. |
+| `ZALO_TG_SHARED_TMP_ROOT` | auto | app | Shared temp root for file paths that must be visible to both the bridge and local Bot API. Defaults to `/tmp` in local mode on POSIX, otherwise OS temp. |
+| `ZALO_TG_RUNNER` | unset | app / Compose | Set to `1` only when an external supervisor restarts the process after update/restart exit codes. Do not set `0`; leave unset. |
+| `NODE_ENV` | Docker sets `production` | Docker / Node | Runtime mode; normally managed by Docker. |
+| `ZALO_TG_TUI` | enabled | app | `0` disables the live TUI/dashboard and prints normal logs. |
+| `ZALO_TG_TUI_ENGINE` | auto | app | `ansi` forces the legacy TypeScript ANSI dashboard instead of the Go sidecar. |
+| `ZALO_TG_TUI_MOUSE` | enabled | app | Use `0`, `false`, `off`, `no` or `native` to keep native terminal mouse selection. |
+| `ZALO_TG_TUI_BIN` | auto-detect `bin/zalo-tg-tui` | app | Custom path to the Go TUI sidecar binary. |
+| `ZALO_TG_GLOW_BIN` | auto-detect sibling `glow`, then `PATH` | Go TUI | Custom path to the Glow renderer used for the TUI help pane. |
+| `ZALO_TG_TUI_DUMP_ON_EXIT` | enabled | app | `0` disables dumping the last TUI activity lines when the sidecar exits early. |
+| `ZALO_TG_TUI_SIDECAR` | set internally | app / Go TUI | Internal marker added when Node spawns the Go sidecar. Do not set manually. |
+| `ZALO_TG_NO_ANIMATION` | unset | app | `1` disables startup/shutdown terminal animations. |
+| `NO_COLOR` | unset | app / terminal convention | Any value disables colored dashboard output. |
+| `TERM` | terminal-provided | app / terminal convention | `TERM=dumb` disables the interactive dashboard. Usually do not set manually. |
+| `ZALO_TG_INSTALL_DIR` | `~/zalo-tg` | installer only | Target checkout directory for `curl | sh`; export before running `install.sh`. |
+| `ZALO_TG_REPO` | this GitHub repo | installer only | Repository URL used by `install.sh`; export before running the installer. |
 
 After the bot starts, send `/login` in the Telegram group or in a private chat with the bot. Scan the QR code with Zalo. When login succeeds, the bridge starts listening and creates topics as conversations appear.
 
@@ -111,7 +131,7 @@ After the bot starts, send `/login` in the Telegram group or in a private chat w
 
 | Script | Purpose |
 | --- | --- |
-| `sh install.sh` | Interactive shell installer with a polished terminal UI; prepares dependencies, `.env`, TypeScript build and optional Go TUI sidecar. |
+| `sh install.sh` | Interactive shell installer with a polished terminal UI; prepares dependencies, runs the full `.env` wizard, builds TypeScript and optional Go TUI sidecar. |
 | `npm run dev` | Run the TypeScript app through `tsx`. |
 | `npm run dev:watch` | Run with Node watch mode. |
 | `npm run build` | Compile TypeScript into `dist/`. |
