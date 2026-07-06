@@ -339,7 +339,7 @@ async function main(): Promise<void> {
            const totalTopics = store.all().filter(e => e.type === 1).length;
            const dmTopics   = store.all().filter(e => e.type === 0).length;
            const accountLines = Array.from(apis.entries()).map(([id]) => {
-             const alias = accountAliasStore.get(id) || id;
+             const alias = accountAliasStore.get(id) || accountNameStore.get(id) || id;
              return `  • ${alias}`;
            }).join('\n');
            tgBot.telegram.sendMessage(
