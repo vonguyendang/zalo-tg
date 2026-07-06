@@ -316,18 +316,14 @@ async function main(): Promise<void> {
         for (const [accountId, api] of apis.entries()) {
            const uid = api.getOwnId?.();
            let fetchedName: string | undefined;
-           if (uid) {
-             const resp = await api.getUserInfo(uid).catch(() => undefined) as any;
-             if (resp) {
-               const uidKey = uid.includes('_') ? uid : `${uid}_0`;
-               const profile =
-                 resp.changed_profiles?.[uidKey] ??
-                 resp.changed_profiles?.[uid] ??
-                 resp.unchanged_profiles?.[uidKey] ??
-                 resp.unchanged_profiles?.[uid];
-               fetchedName = profile?.displayName?.trim() || profile?.zaloName?.trim();
-             }
-           }
+            if (uid) {
+              try {
+                const info = await api.fetchAccountInfo() as { profile?: { displayName?: string; zaloName?: string } };
+                fetchedName = info?.profile?.displayName?.trim() || info?.profile?.zaloName?.trim();
+              } catch {
+                console.warn(`[Boot] Could not fetch profile for ${accountId}`);
+              }
+            }
            const accountName = fetchedName || accountAliasStore.get(accountId) || accountNameStore.get(accountId) || 'Zalo';
            if (fetchedName) {
              accountNameStore.set(accountId, fetchedName);
