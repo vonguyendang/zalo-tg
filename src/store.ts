@@ -657,10 +657,19 @@ export const accountAliasStore = {
   get(accountId: string): string | undefined {
     return _data.accountAliases ? _data.accountAliases[accountId] : undefined;
   },
+  getAll(): Record<string, string> {
+    return _data.accountAliases || {};
+  },
   set(accountId: string, alias: string): void {
     if (!_data.accountAliases) _data.accountAliases = {};
     _data.accountAliases[accountId] = alias;
     persist(_data);
+  },
+  remove(accountId: string): void {
+    if (_data.accountAliases && _data.accountAliases[accountId]) {
+      delete _data.accountAliases[accountId];
+      persist(_data);
+    }
   }
 };
 

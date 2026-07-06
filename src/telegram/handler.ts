@@ -3584,15 +3584,38 @@ export function setupSetAlias(bot: any) {
     if (ctx.chat.id !== config.telegram.groupId && ctx.chat.type !== 'private') return;
     const parts = ctx.message.text.split(' ');
     if (parts.length < 3) {
-      await ctx.reply('Sử dụng: /setalias <accountId> <Tên bí danh>\nVí dụ: /setalias 1508995969111268915 Đăng');
+      await ctx.reply('Sử dụng: /setalias <accountId> <Tên bí danh | remove>\nVí dụ: /setalias 1508995969111268915 Đăng\nHoặc để xóa: /setalias 1508995969111268915 remove');
       return;
     }
     const accId = parts[1];
-    const alias = parts.slice(2).join(' ');
+    const alias = parts.slice(2).join(' ').trim();
     import('../store.js').then(store => {
-      store.accountAliasStore.set(accId, alias);
+      if (alias.toLowerCase() === 'remove' || alias.toLowerCase() === 'delete' || alias.toLowerCase() === 'xoa') {
+        store.accountAliasStore.remove(accId);
+        ctx.reply(`✅ Đã xóa bí danh cho tài khoản ${accId}`);
+      } else {
+        store.accountAliasStore.set(accId, alias);
+        ctx.reply(`✅ Đã đặt bí danh cho tài khoản ${accId} là: ${alias}\nGợi ý: Hãy chạy lệnh /sync_aliases để cập nhật tiền tố các nhóm.`);
+      }
     });
-    await ctx.reply(`✅ Đã đặt bí danh cho tài khoản ${accId} là: ${alias}`);
+  });
+
+    // @ts-ignore
+  bot.command('aliases', async (ctx) => {
+    if (ctx.chat.id !== config.telegram.groupId && ctx.chat.type !== 'private') return;
+    import('../store.js').then(store => {
+      const allAliases = store.accountAliasStore.getAll();
+      const keys = Object.keys(allAliases);
+      if (keys.length === 0) {
+        ctx.reply('Không có tài khoản nào được đặt bí danh.');
+        return;
+      }
+      let msg = '📋 <b>Danh sách bí danh (Aliases):</b>\n\n';
+      for (const accId of keys) {
+        msg += `- <code>${accId}</code> : <b>${allAliases[accId]}</b>\n`;
+      }
+      ctx.reply(msg, { parse_mode: 'HTML' });
+    });
   });
 }
 
