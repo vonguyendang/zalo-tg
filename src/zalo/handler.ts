@@ -6,7 +6,7 @@ import QRCode from 'qrcode';
 import type { ZaloAPI, ZaloMessage, ZaloMediaContent, ZaloGroupInfoResponse } from './types.js';
 import { appGetGroupInfo, appGetGroupMembersInfo, appGetFriendProfilesV2 } from './appApi.js';
 import { ZALO_MSG_TYPES } from './types.js';
-import { store } from '../store.js';
+import { store, accountAliasStore } from '../store.js';
 import { tgBot } from '../telegram/bot.js';
 import { config } from '../config.js';
 import { downloadToTemp, cleanTemp } from '../utils/media.js';
@@ -398,7 +398,8 @@ async function maybeRenameExistingDmTopic(
   const entry = store.getEntryByTopic(topicId);
   if (!entry || entry.type !== ThreadType.User || entry.name === displayName) return;
 
-  const nextName = `[${accountName}] ` + topicName(displayName, ThreadType.User);
+  const alias = (entry.accountId ? accountAliasStore.get(entry.accountId) : undefined) || accountName;
+  const nextName = `[${alias}] ` + topicName(displayName, ThreadType.User);
   try {
     await tg.editForumTopic(config.telegram.groupId, topicId, { name: nextName });
     store.updateName(topicId, displayName);
@@ -478,7 +479,8 @@ async function _doCreateTopic(api: ZaloAPI, accountId: string, accountName: stri
   const existing = store.getTopicByZalo(accountId, zaloId, type);
   if (existing !== undefined) return existing;
 
-  const name = `[${accountName}] ` + topicName(displayName, type);
+  const alias = accountAliasStore.get(accountId) || accountName;
+  const name = `[${alias}] ` + topicName(displayName, type);
   const color = type === ThreadType.Group ? 0xFF93B2 : 0x6FB9F0;
 
   let topic: { message_thread_id: number };
