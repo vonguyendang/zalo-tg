@@ -7,7 +7,8 @@ MIN_NODE="20.11.0"
 MIN_GO="1.24.0"
 REPO_URL="${ZALO_TG_REPO:-https://github.com/williamcachamwri/zalo-tg.git}"
 RAW_INSTALL_URL="https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh"
-DEFAULT_INSTALL_DIR="${HOME:-${USERPROFILE:-.}}/${APP_NAME}"
+CALL_DIR=$(pwd)
+DEFAULT_INSTALL_DIR="$CALL_DIR"
 INSTALL_DIR="${ZALO_TG_INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
 
 ASSUME_YES=0
@@ -84,7 +85,7 @@ Behavior:
   accept default .env values without prompting.
 
 Environment:
-  ZALO_TG_INSTALL_DIR  Same as --dir
+  ZALO_TG_INSTALL_DIR  Same as --dir; default is the current terminal path
   ZALO_TG_REPO         Same as --repo
 EOF
       exit 0
@@ -98,7 +99,6 @@ EOF
 done
 
 SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" 2>/dev/null && pwd || pwd)
-CALL_DIR=$(pwd)
 ROOT_DIR=$SCRIPT_DIR
 BOOTSTRAP_MODE=0
 OS_FAMILY="unknown"
@@ -356,7 +356,7 @@ EOF
 
 # ─── Installer-only variables ──────────────────────────────────────────────
 # Export these before running install.sh if you need them.
-# ZALO_TG_INSTALL_DIR=$HOME/zalo-tg
+# ZALO_TG_INSTALL_DIR=$PWD
 # ZALO_TG_REPO=https://github.com/williamcachamwri/zalo-tg.git
 EOF
 }
@@ -486,6 +486,57 @@ build_tui_sidecar() {
   run_cmd "Install Glow renderer" env GOBIN="$ROOT_DIR/bin" go install github.com/charmbracelet/glow@v1.5.1
 }
 
+origin_branch() {
+  target=$1
+  branch=$(git -C "$target" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)
+  current=$(git -C "$target" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+  [ "$current" = "HEAD" ] && current=""
+  for candidate in "$branch" "$current" main master; do
+    [ -n "$candidate" ] || continue
+    if git -C "$target" rev-parse --verify --quiet "origin/$candidate" >/dev/null; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  printf '%s\n' main
+}
+
+sync_existing_checkout() {
+  target=$1
+  stamp=$(date +%Y%m%d%H%M%S)
+  backup_branch="installer-backup-$stamp-$$"
+  stash_name="installer-autostash-$stamp"
+
+  run_cmd "Fetch latest checkout" git -C "$target" fetch origin
+  branch=$(origin_branch "$target")
+  if ! git -C "$target" rev-parse --verify --quiet "origin/$branch" >/dev/null 2>&1; then
+    fail "origin/$branch not found after fetch"
+    exit 1
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    run_cmd "Backup current checkout branch" git -C "$target" branch "$backup_branch"
+    run_cmd "Reset checkout to origin/$branch" git -C "$target" checkout -B "$branch" "origin/$branch"
+    return 0
+  fi
+
+  current_head=$(git -C "$target" rev-parse HEAD 2>/dev/null || true)
+  remote_head=$(git -C "$target" rev-parse "origin/$branch")
+  if [ "$current_head" = "$remote_head" ] && [ -z "$(git -C "$target" status --porcelain --untracked-files=no)" ]; then
+    ok "checkout already matches origin/$branch"
+    return 0
+  fi
+
+  if [ -n "$(git -C "$target" status --porcelain --untracked-files=no)" ]; then
+    run_cmd "Stash tracked local changes" git -C "$target" stash push -m "$stash_name"
+    note "tracked local changes saved in git stash: $stash_name"
+  fi
+
+  run_cmd "Backup current checkout branch" git -C "$target" branch "$backup_branch"
+  run_cmd "Reset checkout to origin/$branch" git -C "$target" checkout -B "$branch" "origin/$branch"
+  note "previous local HEAD saved as branch: $backup_branch"
+}
+
 header
 
 detect_os
@@ -517,17 +568,20 @@ else
     if [ -f "$ROOT_DIR/package.json" ]; then
       ok "existing checkout found"
       if [ -d "$ROOT_DIR/.git" ]; then
-        if confirm "Update existing checkout with git pull --ff-only?" "Y"; then
-          run_cmd "Update existing checkout" git -C "$ROOT_DIR" pull --ff-only
-        else
-          warn "checkout update skipped"
-        fi
+        confirm "Sync existing checkout to latest origin branch?" "Y" >/dev/null
+        sync_existing_checkout "$ROOT_DIR"
       else
         warn "target has package.json but is not a Git checkout; not updating"
       fi
+    elif [ -z "$(find "$ROOT_DIR" -mindepth 1 -maxdepth 1 2>/dev/null | sed -n '1p')" ]; then
+      run_cmd "Clone repository into target directory" git clone "$REPO_URL" "$ROOT_DIR"
+      if [ "$DRY_RUN" -eq 1 ]; then
+        warn "dry-run stopped before workspace setup because checkout was not created"
+        exit 0
+      fi
     else
       fail "target directory exists but does not look like $APP_NAME: $ROOT_DIR"
-      warn "Choose another path with: ZALO_TG_INSTALL_DIR=/path sh install.sh"
+      warn "Run from an empty install directory, or choose another path with: ZALO_TG_INSTALL_DIR=/path sh install.sh"
       exit 1
     fi
   else
