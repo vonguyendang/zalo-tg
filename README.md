@@ -58,7 +58,7 @@ curl.exe -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/i
 sh install.sh
 ```
 
-The curl installer clones or updates the project in the current terminal directory by default, then checks Node/npm/Go, installs npm dependencies, builds the Charmbracelet TUI sidecar when Go is available, and opens a polished `.env` setup wizard. It auto-runs default actions without waiting for yes/no confirmations; existing `.env` files are backed up before the wizard writes a fresh one.
+The curl installer clones or updates the project in `./zalo-tg` under your current terminal directory by default, then checks Node/npm/Go, installs npm dependencies, builds the Charmbracelet TUI sidecar when Go is available, and opens a polished `.env` setup wizard. It auto-runs default actions without waiting for yes/no confirmations; existing `.env` files are backed up before the wizard writes a fresh one.
 
 To choose another install directory:
 
@@ -122,7 +122,7 @@ Copy [.env.example](.env.example) for the full template. Complete configuration 
 | `ZALO_TG_NO_ANIMATION` | unset | app | `1` disables startup/shutdown terminal animations. |
 | `NO_COLOR` | unset | app / terminal convention | Any value disables colored dashboard output. |
 | `TERM` | terminal-provided | app / terminal convention | `TERM=dumb` disables the interactive dashboard. Usually do not set manually. |
-| `ZALO_TG_INSTALL_DIR` | current terminal directory | installer only | Target checkout directory for `curl | sh`; export before running `install.sh` to override. |
+| `ZALO_TG_INSTALL_DIR` | `./zalo-tg` under current terminal directory | installer only | Target checkout directory for `curl | sh`; export before running `install.sh` to override. |
 | `ZALO_TG_REPO` | this GitHub repo | installer only | Repository URL used by `install.sh`; export before running the installer. |
 
 After the bot starts, send `/login` in the Telegram group or in a private chat with the bot. Scan the QR code with Zalo. When login succeeds, the bridge starts listening and creates topics as conversations appear.
