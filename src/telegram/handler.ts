@@ -1821,6 +1821,52 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
     }
   });
 
+  tgBot.command('restore', async (ctx) => {
+    if (ctx.chat.id !== config.telegram.groupId) return;
+    
+    const reply = 'reply_to_message' in ctx.message ? ctx.message.reply_to_message : undefined;
+    if (!reply || !('document' in reply) || !reply.document) {
+      await ctx.reply('❌ Vui lòng Reply (trả lời) lại tin nhắn chứa file backup (.zip) do bot gửi và gõ /restore');
+      return;
+    }
+    
+    const doc = reply.document;
+    if (!doc.file_name?.endsWith('.zip')) {
+      await ctx.reply('❌ File backup không hợp lệ (phải là file .zip)');
+      return;
+    }
+    
+    const waitMsg = await ctx.reply('⏳ Đang tải và khôi phục dữ liệu, bot sẽ tự khởi động lại sau khi hoàn tất...');
+    
+    try {
+      const fileUrl = await ctx.telegram.getFileLink(doc.file_id);
+      
+      const axios = (await import('axios')).default;
+      const response = await axios.get(fileUrl.href, { responseType: 'arraybuffer' });
+      const buffer = Buffer.from(response.data);
+      
+      const AdmZip = (await import('adm-zip')).default;
+      const zip = new AdmZip(buffer);
+      
+      // Lấy đường dẫn an toàn bằng cách tham chiếu thư mục cha của dataDir
+      const path = await import('path');
+      const projectRoot = path.resolve(config.dataDir, '..');
+      
+      // Trích xuất toàn bộ đè lên thư mục hiện tại
+      zip.extractAllTo(projectRoot, true);
+      
+      await ctx.reply('✅ Đã khôi phục thành công! Đang khởi động lại Bot để nhận diện dữ liệu mới...');
+      await ctx.deleteMessage(waitMsg.message_id).catch(() => {});
+      
+      // Delay một chút để tin nhắn chắc chắn được gửi đi trước khi tắt
+      setTimeout(() => process.exit(0), 2000);
+      
+    } catch (err) {
+      await ctx.reply(`❌ Lỗi khi khôi phục: ${String(err)}`);
+      await ctx.deleteMessage(waitMsg.message_id).catch(() => {});
+    }
+  });
+
   tgBot.command('whitelistbot', async (ctx) => {
     if (ctx.chat.id !== config.telegram.groupId) return;
     const text = ctx.message.text ?? '';
