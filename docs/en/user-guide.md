@@ -115,32 +115,29 @@ When an incoming Zalo message arrives, the Bot will automatically create a Topic
 
 ## 4. Backup and Migration
 
-If you are running the bot on one device (e.g., a Mac) and want to migrate to another device (e.g., a Linux VPS or Android phone) without having to log in again or losing your current Topic linkages, you only need to back up the core files.
+If you want to back up your data to prevent data loss, or need to migrate your bot to another device (e.g., from a personal computer to a Linux VPS) without having to log in again and losing your mapped topics, you can use the automated Telegram backup feature.
 
-### Files you MUST keep
-- **The `.env` file**: Contains your configuration (Token, Group ID).
-- **The `sessions/` folder**: Contains your Zalo login session files:
-  - `credentials.json` and `app-session.json`: Keeps your Zalo login session active (no need to scan QR again).
-- **The `data/` folder**: Contains all your bot databases, including:
-  - `topics.json`: Saves the mapping between Zalo groups and Telegram Topics.
-  - `msg-map.json` (or `msg-map.json.gz`): Saves the 2-way linkage of all messages (ensures Reply and Recall features work).
-  - `user-cache.json.gz`: Saves the cache of usernames and UIDs.
-  - `polls.json.gz`: Saves the linkages of Polls between Zalo and Telegram.
+### Automated Backup
+Simply type the following command in your Telegram management group:
+```bash
+/backup
+```
+The bot will automatically compress all important files (including the `data/` folder, `sessions/` folder, `aliases.json` file, and your `.env` configuration) into a `.zip` file and send it directly to the Telegram group.
+> ⚠️ **Security Warning**: This `.zip` file contains your Zalo login credentials (cookies/tokens). **NEVER send, share, or forward this file to anyone** to prevent unauthorized access to your account.
 
-### Files you must NEVER copy to the new machine
-- **`node_modules/`** and **`dist/`**: Source code and libraries are compiled specifically for the old operating system/CPU architecture. Copying them to a new machine with a different architecture (e.g., from Mac to Linux) will crash the bot immediately.
-
-### Safe Migration Process
-1. **On the new device:** Install the environment (Node.js, Git, FFmpeg) and clone the source code fresh:
+### Automated Restore
+When you need to restore your data (due to accidental deletion, or migrating to a new server), follow these steps:
+1. Ensure the bot is running on the target device.
+2. Locate the message with the attached backup `.zip` file previously sent by the bot.
+3. Swipe or click **Reply** to that specific message containing the `.zip` file.
+4. Type the command:
    ```bash
-   git clone https://github.com/williamcachamwri/zalo-tg
-   cd zalo-tg
-   npm install
+   /restore
    ```
-2. **Transfer data:** Copy the `.env` file, the `sessions/` folder, and the `data/` folder from your old machine into the `zalo-tg/` folder on your new machine.
-3. **Start the bot:** Rebuild the source code and start the bot:
-   ```bash
-   npm run build
-   npm start
-   ```
-As soon as it starts, the bot on the new device will resume the old connection and continue running seamlessly.
+5. Send it. The bot will automatically download the zip file, extract and safely overwrite the system files, and immediately restart to apply the new data.
+
+### Quick Migration Process to a New Machine
+1. On your old machine, type `/backup` to get the `.zip` archive.
+2. On your new device (VPS/Android/Mac), install the bot and start it up for the first time as usual.
+3. Add the bot to your Telegram group (using the same token and configuration).
+4. Reply to the `.zip` file with `/restore`. That's it! All your Zalo login sessions and topic history will resume seamlessly as if nothing happened.

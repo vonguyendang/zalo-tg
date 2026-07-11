@@ -606,6 +606,8 @@ After the bot starts, send `/login` in the Telegram group or in a private chat w
 | `/status` | Show bridge health and mapping counts. |
 | `/restart` | Request a supervised restart. |
 | `/update` | Check for available project updates. |
+| `/backup` | Backup all data, sessions, aliases, and .env. |
+| `/restore` | Restore data from a backup zip file. |
 
 ## Codebase map
 

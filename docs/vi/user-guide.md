@@ -116,32 +116,29 @@ Khi có tin nhắn Zalo gửi đến, Bot sẽ tự động tạo một Topic (L
 
 ## 4. Sao lưu và Di chuyển Bot (Migration)
 
-Nếu bạn đang chạy bot trên một thiết bị (ví dụ: máy Mac) và muốn chuyển sang một thiết bị khác (ví dụ: VPS Linux hoặc điện thoại Android) mà không muốn phải đăng nhập lại hay mất liên kết của các Topic hiện tại, bạn chỉ cần thực hiện việc sao lưu đúng các file cốt lõi.
+Nếu bạn muốn sao lưu dữ liệu đề phòng rủi ro, hoặc cần di chuyển (migrate) bot sang thiết bị khác (ví dụ từ máy tính cá nhân lên VPS Linux) mà không muốn phải quét lại mã QR đăng nhập và mất các topic đã liên kết, bạn có thể sử dụng tính năng sao lưu tự động qua Telegram.
 
-### Những file bắt buộc phải giữ lại
-- **File `.env`**: Chứa thông tin cấu hình (Token, Group ID).
-- **Thư mục `sessions/`**: Chứa các file phiên đăng nhập Zalo:
-  - `credentials.json` và `app-session.json`: Giúp bạn không phải quét lại mã QR khi sang máy mới.
-- **Thư mục `data/`**: Chứa toàn bộ cơ sở dữ liệu của Bot, bao gồm:
-  - `topics.json`: Lưu bản đồ liên kết nhóm Zalo và Topic Telegram.
-  - `msg-map.json` (hoặc `msg-map.json.gz`): Lưu liên kết 2 chiều của tất cả tin nhắn (đảm bảo tính năng Reply và Thu hồi hoạt động).
-  - `user-cache.json.gz`: Lưu bộ nhớ đệm tên người dùng và UID.
-  - `polls.json.gz`: Lưu liên kết các bảng bình chọn (Poll) giữa Zalo và Telegram.
+### Sao lưu (Backup) tự động
+Bạn chỉ cần gõ lệnh sau trong nhóm quản lý Telegram:
+```bash
+/backup
+```
+Bot sẽ tự động nén toàn bộ các file quan trọng (gồm thư mục `data/`, thư mục `sessions/`, file `aliases.json` và cả file biến môi trường `.env`) thành một file `.zip` và gửi trực tiếp vào nhóm Telegram cho bạn.
+> ⚠️ **Lưu ý Bảo mật**: File `.zip` này chứa thông tin đăng nhập Zalo (cookie/token) của bạn. **TUYỆT ĐỐI KHÔNG gửi, chia sẻ hoặc forward file này cho bất kỳ ai** để tránh bị chiếm quyền tài khoản.
 
-### Những file tuyệt đối KHÔNG sao chép sang máy mới
-- **`node_modules/`** và **`dist/`**: Mã nguồn và thư viện được biên dịch riêng cho hệ điều hành/CPU cũ. Sao chép chúng sang máy mới có kiến trúc khác (như từ Mac sang Linux) sẽ gây lỗi sập bot ngay lập tức.
-
-### Quy trình "Chuyển nhà" an toàn
-1. **Trên thiết bị mới:** Cài đặt đầy đủ môi trường (Node.js, Git, FFmpeg) và clone mã nguồn về như một lượt cài đặt mới:
+### Khôi phục (Restore) tự động
+Khi cần khôi phục lại dữ liệu (do xoá nhầm, hoặc mang sang máy chủ mới), bạn làm như sau:
+1. Đảm bảo bot đã được bật trên máy/thiết bị đích.
+2. Tìm lại tin nhắn có đính kèm file backup `.zip` mà bot đã gửi trước đó trong nhóm.
+3. Vuốt/nhấn **Reply (Trả lời)** vào chính tin nhắn chứa file `.zip` đó.
+4. Gõ lệnh:
    ```bash
-   git clone https://github.com/williamcachamwri/zalo-tg
-   cd zalo-tg
-   npm install
+   /restore
    ```
-2. **Chuyển dữ liệu:** Sao chép file `.env`, thư mục `sessions/` và thư mục `data/` từ máy cũ sang thư mục `zalo-tg/` trên máy mới.
-3. **Khởi động:** Biên dịch lại mã nguồn và chạy bot:
-   ```bash
-   npm run build
-   npm start
-   ```
-Ngay khi khởi động, bot trên thiết bị mới sẽ nối lại kết nối cũ và tiếp tục chạy mượt mà.
+5. Gửi đi. Bot sẽ tự động tải file zip về, giải nén ghi đè lên hệ thống một cách an toàn và tự khởi động lại (restart) ngay lập tức để nhận diện toàn bộ dữ liệu mới.
+
+### Quy trình "Chuyển nhà" (Migrate) siêu tốc sang máy mới
+1. Trên máy cũ, gõ `/backup` để lấy file `.zip` nén.
+2. Trên thiết bị mới (VPS/Android/Mac), cài đặt bot và khởi động lần đầu như bình thường.
+3. Thêm Bot vào nhóm (cùng token cũ, cấu hình bot như cũ).
+4. Reply lại file `.zip` và gõ `/restore`. Thế là xong! Mọi phiên đăng nhập Zalo và lịch sử topic sẽ nối lại mượt mà như chưa từng có cuộc chia ly.

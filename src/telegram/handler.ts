@@ -1800,11 +1800,24 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       const zip = new AdmZip();
       
       const fs = await import('fs');
+      const path = await import('path');
+      const projectRoot = path.resolve(config.dataDir, '..');
+
       if (fs.existsSync(config.dataDir)) {
         zip.addLocalFolder(config.dataDir, 'data');
       }
       if (fs.existsSync(config.zalo.credentialsDir)) {
         zip.addLocalFolder(config.zalo.credentialsDir, 'sessions');
+      }
+      
+      const aliasesPath = path.resolve(projectRoot, 'aliases.json');
+      if (fs.existsSync(aliasesPath)) {
+        zip.addLocalFile(aliasesPath);
+      }
+      
+      const envPath = path.resolve(projectRoot, '.env');
+      if (fs.existsSync(envPath)) {
+        zip.addLocalFile(envPath);
       }
       
       const zipBuffer = zip.toBuffer();

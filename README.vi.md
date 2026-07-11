@@ -350,6 +350,8 @@ ZALO_SKIP_MUTED_GROUPS=false
 | `/status` | Xem tình trạng bridge và số lượng mapping. |
 | `/restart` | Yêu cầu restart nếu đang chạy dưới supervisor. |
 | `/update` | Kiểm tra bản cập nhật. |
+| `/backup` | Sao lưu toàn bộ dữ liệu, sessions, aliases và .env. |
+| `/restore` | Khôi phục dữ liệu từ file backup zip. |
 
 ## Bản đồ codebase
 
