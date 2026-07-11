@@ -19,12 +19,16 @@ To ensure the bot recovers automatically after a power outage and runs safely 24
 
 ### 1. Enable Auto-login
 > Ensures the bot automatically restarts if your Mac loses power and turns back on.
+> 
+> 💡 **Explanation:** This feature acts as an "insurance policy" against power outages or system restarts after updates. If you plan to keep your Mac running continuously without ever shutting it down, **you do not need to enable this feature.**
 - Open **System Settings** > **Users & Groups**.
 - Find **Automatically log in as**.
 - Select your account and enter your password to confirm.
 
 ### 2. Lock Screen Settings
 > Ensures your Mac locks automatically when the lid is closed for security.
+> 
+> 💡 **Explanation:** When Clamshell Mode is enabled, your Mac does NOT sleep even when the lid is closed. Setting this to "Immediately" ensures that the precise moment the display turns off (when you close the lid), the system is instantly locked with a password. If someone opens the lid, they will be blocked by the login screen, preventing unauthorized access. This feature works independently even if you don't enable Auto-login.
 - Open **System Settings** > **Lock Screen**.
 - Set **Require password after screen saver begins or display is turned off** to `Immediately`.
 
