@@ -3,6 +3,7 @@ import Cocoa
 class AppDelegate: NSObject, NSApplicationDelegate {
     static let shared = AppDelegate()
     var statusItem: NSStatusItem!
+    var clamshellItem: NSMenuItem!
     var timer: Timer?
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
@@ -19,6 +20,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let m6 = NSMenuItem(title: "Log retention config", action: #selector(setLogRetention), keyEquivalent: ""); m6.target = self; menu.addItem(m6)
         let m7 = NSMenuItem(title: "Clean logs now", action: #selector(cleanLogsNow), keyEquivalent: ""); m7.target = self; menu.addItem(m7)
         let m8 = NSMenuItem(title: "Branch config", action: #selector(setBranch), keyEquivalent: ""); m8.target = self; menu.addItem(m8)
+        clamshellItem = NSMenuItem(title: "Clamshell Mode: Loading...", action: #selector(toggleClamshell), keyEquivalent: "")
+        clamshellItem.target = self
+        menu.addItem(clamshellItem)
         let m9 = NSMenuItem(title: "Help / Guide", action: #selector(showHelp), keyEquivalent: ""); m9.target = self; menu.addItem(m9)
         menu.addItem(NSMenuItem.separator())
         let m10 = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"); m10.target = self; menu.addItem(m10)
@@ -81,6 +85,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             statusItem.button?.title = ""
             statusItem.button?.image = createIcon(color: NSColor.systemGray)
+        }
+        
+        // Update Clamshell status
+        let pmTask = Process()
+        pmTask.launchPath = "/bin/bash"
+        pmTask.arguments = ["-c", "pmset -g | grep -i 'SleepDisabled' | awk '{print $2}'"]
+        let pmPipe = Pipe()
+        pmTask.standardOutput = pmPipe
+        
+        do {
+            try pmTask.run()
+            pmTask.waitUntilExit()
+            let pmData = pmPipe.fileHandleForReading.readDataToEndOfFile()
+            if let pmOutput = String(data: pmData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                DispatchQueue.main.async {
+                    if pmOutput == "1" {
+                        self.clamshellItem.title = "Clamshell Mode: ON (Chống sleep 24/7)"
+                    } else {
+                        self.clamshellItem.title = "Clamshell Mode: OFF (Sleep bình thường)"
+                    }
+                }
+            }
+        } catch {
+            print("Failed to check pmset")
         }
     }
 
@@ -157,6 +185,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func setBranch() {
         runControlScript(action: "set_branch", silent: false)
+    }
+
+    @objc func toggleClamshell() {
+        runControlScript(action: "toggle_clamshell", silent: false)
     }
 
     @objc func showHelp() {

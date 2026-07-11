@@ -84,7 +84,6 @@ fi
 if [[ -f "\$SETTINGS_FILE" ]]; then source "\$SETTINGS_FILE"; fi
 /usr/bin/git checkout "${BOT_BRANCH:-multi-zalo}" >> "\$LOG_DIR/git.log" 2>&1
 /usr/bin/pkill telegram-bot-api 2>/dev/null || true
-npm run build >> "\$LOG_DIR/build.log" 2>&1
 
 ./run-bot-api.sh >> "\$LOG_DIR/bot-api.log" 2>&1 &
 
@@ -165,6 +164,7 @@ is_loaded() {
 start_bot() {
   local silent="${1:-}"
   clean_old_logs
+  cd "$PROJECT_DIR" && npm run build >> "$LOG_DIR/build.log" 2>&1
   write_run_script
   write_plist
   launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
@@ -191,6 +191,7 @@ restart_bot() {
   /usr/bin/pkill -f 'node dist/index.js' >/dev/null 2>&1 || true
   /usr/bin/pkill telegram-bot-api >/dev/null 2>&1 || true
   clean_old_logs
+  cd "$PROJECT_DIR" && npm run build >> "$LOG_DIR/build.log" 2>&1
   write_run_script
   write_plist
   launchctl bootstrap "gui/$(id -u)" "$PLIST"
@@ -282,23 +283,37 @@ Xem chi tiết tại: cleanup.log" buttons {"OK"} default button "OK" with title
 OSA
 }
 
+toggle_clamshell() {
+  local current
+  current=$(pmset -g | grep -w "disablesleep" | awk '{print $2}')
+  if [[ "$current" == "1" ]]; then
+    osascript -e 'do shell script "pmset -a disablesleep 0" with administrator privileges'
+    osascript -e 'display dialog "✅ Đã TẮT chế độ chống Sleep.\n\nMáy sẽ sleep bình thường khi gập màn hình." buttons {"OK"} default button "OK" with title "Zalo Bot Control"'
+  else
+    osascript -e 'do shell script "pmset -a disablesleep 1" with administrator privileges'
+    osascript -e 'display dialog "✅ Đã BẬT chế độ chống Sleep 24/7.\n\nBây giờ bạn có thể gập màn hình mà máy vẫn tiếp tục chạy Bot.\n(Nhớ cắm sạc nhé!)" buttons {"OK"} default button "OK" with title "Zalo Bot Control"'
+  fi
+}
+
 show_help() {
   osascript <<OSA
-display dialog "Cách dùng:
-1. Chọn Bật bot để cài và chạy.
-2. Chọn Khởi động lại bot để nạp lại code mới / reset bot.
-3. Chọn Xem trạng thái để kiểm tra.
-4. Chọn Mở log để xem lỗi.
-5. Chọn Tắt bot để dừng.
-6. Chọn Cấu hình xóa log để đặt số ngày giữ log.
-7. Chọn Xóa log ngay để dọn log cũ thủ công.\n8. Chọn Cấu hình nhánh để đổi branch." buttons {"OK"} default button "OK" with title "Zalo Bot Control"
+display dialog "📌 HƯỚNG DẪN SỬ DỤNG:
+1. Start / Restart / Stop: Bật, tắt, hoặc khởi động lại bot.
+2. Show status / Open logs: Xem trạng thái và lỗi.
+3. Các config khác: Quản lý nhánh và dọn log.
+4. Toggle Clamshell Mode: Bật/tắt chế độ gập màn hình không tắt máy.
+
+⚠️ LƯU Ý QUAN TRỌNG KHI CHẠY 24/7:
+- Tự chạy khi bật máy: Hãy vào System Settings -> Users & Groups -> Bật 'Automatically log in' cho user này.
+- Cấp nguồn: Khi BẬT chống sleep (Clamshell Mode), bắt buộc Mac phải được cắm sạc.
+- Mang máy đi: NẾU BẠN CẤT MÁY VÀO BALO, BẮT BUỘC PHẢI TẮT 'Toggle Clamshell Mode' để máy được sleep bình thường. Nếu không máy sẽ bị hầm bí và quá nhiệt!" buttons {"OK"} default button "OK" with title "Zalo Bot Control"
 OSA
 }
 
 # ── Menu chính ──────────────────────────────────────────────────────────────────
 
 CHOICE=$(osascript <<'OSA'
-set picked to choose from list {"Bật bot", "Khởi động lại bot", "Tắt bot", "Xem trạng thái", "Mở log", "Cấu hình xóa log", "Xóa log ngay", "Cấu hình nhánh", "Hướng dẫn"} with prompt "Chọn thao tác:" with title "Zalo Bot Control" default items {"Bật bot"} OK button name "Chọn" cancel button name "Thoát"
+set picked to choose from list {"Bật bot", "Khởi động lại bot", "Tắt bot", "Xem trạng thái", "Mở log", "Cấu hình xóa log", "Xóa log ngay", "Cấu hình nhánh", "Toggle Clamshell Mode", "Hướng dẫn"} with prompt "Chọn thao tác:" with title "Zalo Bot Control" default items {"Bật bot"} OK button name "Chọn" cancel button name "Thoát"
 if picked is false then
 	return "Thoát"
 else
@@ -316,6 +331,7 @@ case "$CHOICE" in
   "Cấu hình xóa log")  set_log_retention ;;
   "Xóa log ngay")      clean_logs_now ;;
   "Cấu hình nhánh")    set_branch ;;
+  "Toggle Clamshell Mode") toggle_clamshell ;;
   "Hướng dẫn")         show_help ;;
   *)                   exit 0 ;;
 esac

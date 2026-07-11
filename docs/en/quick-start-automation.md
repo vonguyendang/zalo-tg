@@ -1,18 +1,29 @@
 # Guide to creating Automator app (`zalo-bot-control.sh`)
 
 <div align="center">
-  <strong>English</strong> | <a href="HDSD%20file%20automation.md">Tiếng Việt</a>
+  <strong>English</strong> | <a href="../vi/quick-start-automation.md">Tiếng Việt</a>
 </div>
 <br>
 <details>
   <summary><b>📖 Documentation Menu</b></summary>
   <ul>
-    <li><a href="../README.md">Home (README)</a></li>
-    <li><a href="../USER_GUIDE.md">User Guide</a></li>
-    <li><a href="../LOCAL_BOT_API_SETUP.md">Local Bot API Setup</a></li>
-    <li><a href="../DEPLOY_HOME_SERVER.md">Home Server Deployment</a></li>
-    <li><a href="GUIDE%20automation.md">Mac Quick Start - Automator</a></li>
-    <li><a href="GUIDE%20command.md">Mac Quick Start - Command</a></li>
+    <li><a href="../../README.md">🏠 Home (README)</a></li>
+    <li><a href="../../docs/en/user-guide.md">📖 Basic User Guide</a></li>
+    <br>
+    <b>🍎 For Mac Users (macOS)</b>
+    <li><a href="../../docs/en/quick-start-automation.md">Install via Automator (Zalo Bot Control)</a></li>
+    <li><a href="../../docs/en/quick-start-command.md">Install via Command</a></li>
+    <li><a href="../../docs/en/clamshell-mode-setup.md">Mac 24/7 Clamshell Mode Setup</a></li>
+    <br>
+    <b>🪟 For Windows Users</b>
+    <li><a href="../../docs/en/quick-start-windows.md">Windows Setup (Native & WSL)</a></li>
+    <br>
+    <b>📱 For Mobile Devices</b>
+    <li><a href="../../docs/en/quick-start-android.md">Android Setup (via Termux)</a></li>
+    <br>
+    <b>⚙️ For Servers & Advanced Users</b>
+    <li><a href="../../docs/en/deploy-home-server.md">Deploy on Linux VPS / Home Server</a></li>
+    <li><a href="../../docs/en/local-bot-api-setup.md">Local Bot API Setup (2GB Large Files)</a></li>
   </ul>
 </details>
 
@@ -96,13 +107,15 @@ macOS will generate `Zalo Bot Control.app` in `/Applications`.
 
 | Option | Effect |
 |---|---|
-| **Bật bot** (Turn on bot) | Clean old logs, build project, create LaunchAgent, start bot |
+| **Bật bot** (Turn on bot) | Build project, clean logs, create LaunchAgent, start bot |
 | **Tắt bot** (Turn off bot) | Stop bot and remove LaunchAgent |
 | **Xem trạng thái** (View status) | Show ON / OFF status and log retention days |
 | **Mở log** (Open logs) | Open log directory in Finder |
 | **Cấu hình xóa log** (Config log cleanup) | Set days to auto-delete logs (0 = disable auto-delete) |
 | **Xóa log ngay** (Clear logs now) | Immediately delete old logs based on current config |
-| **Hướng dẫn** (Guide) | Show short description of options |
+| **Đổi nhánh** (Branch config) | Select another git branch to run the bot |
+| **Toggle Clamshell Mode** | Enable/Disable anti-sleep when lid is closed (Requires password) |
+| **Hướng dẫn** (Guide) | Show short description and important notes |
 
 ---
 
@@ -112,8 +125,9 @@ macOS will generate `Zalo Bot Control.app` in `/Applications`.
 click app → show menu
   → "Bật bot"
       → delete logs older than N days (by config)
-      → git checkout dev
-      → npm run build
+      → npm run build (Builds only once here to prevent overheating during auto-restarts)
+      → configure daemon to keep app alive (launchd)
+      → git checkout the configured branch
       → run run-bot-api.sh (background)
       → wait for port 127.0.0.1:8081 to open (max 30s)
       → exec node dist/index.js
@@ -189,6 +203,15 @@ open ~/Library/Logs/zalo-bot-control
 
 > [!IMPORTANT]
 > The script waits for port `127.0.0.1:8081`. If your Node.js code still calls `http://localhost:8081`, change it to `http://127.0.0.1:8081` to avoid IPv4/IPv6 mismatch.
+
+### Important Notes for 24/7 Operation
+
+> [!CAUTION]
+> IF YOU PUT YOUR MAC IN A BACKPACK, YOU **MUST DISABLE** `Toggle Clamshell Mode` from the menu. Otherwise, the Mac cannot sleep and will overheat in the bag, causing hardware damage!
+
+> [!WARNING]
+> - **Power supply:** When using `Toggle Clamshell Mode` (closed-display mode) to run 24/7, you must keep your Mac plugged into power continuously.
+> - **Auto-start on boot:** macOS requires the user to log in before the system activates the bot's LaunchAgent. Go to `System Settings -> Users & Groups -> Automatically log in` and select your account to handle power outages and automatic reboots.
 
 ### Full reset
 

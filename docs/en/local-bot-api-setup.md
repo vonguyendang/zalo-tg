@@ -1,18 +1,29 @@
 # Local Telegram Bot API Server Setup Guide
 
 <div align="center">
-  <strong>English</strong> | <a href="LOCAL_BOT_API_SETUP.vi.md">Tiếng Việt</a>
+  <strong>English</strong> | <a href="../vi/local-bot-api-setup.md">Tiếng Việt</a>
 </div>
 <br>
 <details>
   <summary><b>📖 Documentation Menu</b></summary>
   <ul>
-    <li><a href="README.md">Home (README)</a></li>
-    <li><a href="USER_GUIDE.md">User Guide</a></li>
-    <li><a href="LOCAL_BOT_API_SETUP.md">Local Bot API Setup</a></li>
-    <li><a href="DEPLOY_HOME_SERVER.md">Home Server Deployment</a></li>
-    <li><a href="quick-start-script/GUIDE%20automation.md">Mac Quick Start - Automator</a></li>
-    <li><a href="quick-start-script/GUIDE%20command.md">Mac Quick Start - Command</a></li>
+    <li><a href="../../README.md">🏠 Home (README)</a></li>
+    <li><a href="../../docs/en/user-guide.md">📖 Basic User Guide</a></li>
+    <br>
+    <b>🍎 For Mac Users (macOS)</b>
+    <li><a href="../../docs/en/quick-start-automation.md">Install via Automator (Zalo Bot Control)</a></li>
+    <li><a href="../../docs/en/quick-start-command.md">Install via Command</a></li>
+    <li><a href="../../docs/en/clamshell-mode-setup.md">Mac 24/7 Clamshell Mode Setup</a></li>
+    <br>
+    <b>🪟 For Windows Users</b>
+    <li><a href="../../docs/en/quick-start-windows.md">Windows Setup (Native & WSL)</a></li>
+    <br>
+    <b>📱 For Mobile Devices</b>
+    <li><a href="../../docs/en/quick-start-android.md">Android Setup (via Termux)</a></li>
+    <br>
+    <b>⚙️ For Servers & Advanced Users</b>
+    <li><a href="../../docs/en/deploy-home-server.md">Deploy on Linux VPS / Home Server</a></li>
+    <li><a href="../../docs/en/local-bot-api-setup.md">Local Bot API Setup (2GB Large Files)</a></li>
   </ul>
 </details>
 

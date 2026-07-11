@@ -1,18 +1,29 @@
 # ZaloBot User Guide (Multi-Account & Mac Menu Bar Version)
 
 <div align="center">
-  <strong>English</strong> | <a href="HUONG_DAN_SU_DUNG.md">Tiếng Việt</a>
+  <strong>English</strong> | <a href="../vi/user-guide.md">Tiếng Việt</a>
 </div>
 <br>
 <details>
   <summary><b>📖 Documentation Menu</b></summary>
   <ul>
-    <li><a href="README.md">Home (README)</a></li>
-    <li><a href="USER_GUIDE.md">User Guide</a></li>
-    <li><a href="LOCAL_BOT_API_SETUP.md">Local Bot API Setup</a></li>
-    <li><a href="DEPLOY_HOME_SERVER.md">Home Server Deployment</a></li>
-    <li><a href="quick-start-script/GUIDE%20automation.md">Mac Quick Start - Automator</a></li>
-    <li><a href="quick-start-script/GUIDE%20command.md">Mac Quick Start - Command</a></li>
+    <li><a href="../../README.md">🏠 Home (README)</a></li>
+    <li><a href="../../docs/en/user-guide.md">📖 Basic User Guide</a></li>
+    <br>
+    <b>🍎 For Mac Users (macOS)</b>
+    <li><a href="../../docs/en/quick-start-automation.md">Install via Automator (Zalo Bot Control)</a></li>
+    <li><a href="../../docs/en/quick-start-command.md">Install via Command</a></li>
+    <li><a href="../../docs/en/clamshell-mode-setup.md">Mac 24/7 Clamshell Mode Setup</a></li>
+    <br>
+    <b>🪟 For Windows Users</b>
+    <li><a href="../../docs/en/quick-start-windows.md">Windows Setup (Native & WSL)</a></li>
+    <br>
+    <b>📱 For Mobile Devices</b>
+    <li><a href="../../docs/en/quick-start-android.md">Android Setup (via Termux)</a></li>
+    <br>
+    <b>⚙️ For Servers & Advanced Users</b>
+    <li><a href="../../docs/en/deploy-home-server.md">Deploy on Linux VPS / Home Server</a></li>
+    <li><a href="../../docs/en/local-bot-api-setup.md">Local Bot API Setup (2GB Large Files)</a></li>
   </ul>
 </details>
 
@@ -99,3 +110,37 @@ When an incoming Zalo message arrives, the Bot will automatically create a Topic
     *   Example: `[Your Zalo Name] Customer Name`
 *   **Replying to messages**: You just need to Reply or send a direct message into that Topic. The bot is smart enough to know which Zalo account this Topic belongs to and will use that exact account to send the message.
 *   **Using commands in Topic**: Any command called inside a Topic (e.g., `/history`) will automatically be executed on the corresponding Zalo account of that Topic.
+
+---
+
+## 4. Backup and Migration
+
+If you are running the bot on one device (e.g., a Mac) and want to migrate to another device (e.g., a Linux VPS or Android phone) without having to log in again or losing your current Topic linkages, you only need to back up the core files.
+
+### Files you MUST keep
+- **The `.env` file**: Contains your configuration (Token, Group ID).
+- **The `sessions/` folder**: Contains your Zalo login session files:
+  - `credentials.json` and `app-session.json`: Keeps your Zalo login session active (no need to scan QR again).
+- **The `data/` folder**: Contains all your bot databases, including:
+  - `topics.json`: Saves the mapping between Zalo groups and Telegram Topics.
+  - `msg-map.json` (or `msg-map.json.gz`): Saves the 2-way linkage of all messages (ensures Reply and Recall features work).
+  - `user-cache.json.gz`: Saves the cache of usernames and UIDs.
+  - `polls.json.gz`: Saves the linkages of Polls between Zalo and Telegram.
+
+### Files you must NEVER copy to the new machine
+- **`node_modules/`** and **`dist/`**: Source code and libraries are compiled specifically for the old operating system/CPU architecture. Copying them to a new machine with a different architecture (e.g., from Mac to Linux) will crash the bot immediately.
+
+### Safe Migration Process
+1. **On the new device:** Install the environment (Node.js, Git, FFmpeg) and clone the source code fresh:
+   ```bash
+   git clone https://github.com/williamcachamwri/zalo-tg
+   cd zalo-tg
+   npm install
+   ```
+2. **Transfer data:** Copy the `.env` file, the `sessions/` folder, and the `data/` folder from your old machine into the `zalo-tg/` folder on your new machine.
+3. **Start the bot:** Rebuild the source code and start the bot:
+   ```bash
+   npm run build
+   npm start
+   ```
+As soon as it starts, the bot on the new device will resume the old connection and continue running seamlessly.

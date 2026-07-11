@@ -1,18 +1,30 @@
 # Hướng Dẫn Sử Dụng ZaloBot (Phiên bản Đa Tài Khoản & Mac Menu Bar)
 
 <div align="center">
-  <strong>Tiếng Việt</strong> | <a href="USER_GUIDE.md">English</a>
+  <strong>Tiếng Việt</strong> | <a href="../en/user-guide.md">English</a>
 </div>
 <br>
 <details>
   <summary><b>📖 Menu Tài Liệu</b></summary>
   <ul>
-    <li><a href="README.vi.md">Trang chủ (README)</a></li>
-    <li><a href="HUONG_DAN_SU_DUNG.md">Hướng dẫn sử dụng</a></li>
-    <li><a href="LOCAL_BOT_API_SETUP.vi.md">Cài đặt Local Bot API</a></li>
-    <li><a href="DEPLOY_HOME_SERVER.vi.md">Triển khai máy chủ cá nhân</a></li>
-    <li><a href="quick-start-script/HDSD%20file%20automation.md">Mac Quick Start - Automator</a></li>
-    <li><a href="quick-start-script/HDSD%20file%20command.md">Mac Quick Start - Command</a></li>
+    <li><a href="../../README.vi.md">🏠 Trang chủ (README)</a></li>
+    <li><a href="../../docs/vi/user-guide.md">📖 Hướng dẫn sử dụng cơ bản</a></li>
+    <br>
+    <b>🍎 Dành cho máy Mac (macOS)</b>
+    <li><a href="../../docs/vi/quick-start-automation.md">Cài đặt bằng Automator (Zalo Bot Control)</a></li>
+    <li><a href="../../docs/vi/quick-start-command.md">Cài đặt bằng Command</a></li>
+    <li><a href="../../docs/vi/clamshell-mode-setup.md">Thiết lập Mac gập màn hình chạy ngầm 24/7</a></li>
+    <br>
+    <b>🪟 Dành cho Windows</b>
+    <li><a href="../../docs/vi/quick-start-windows.md">Cài đặt trên Windows (Native & WSL)</a></li>
+    <br>
+    <b>📱 Dành cho Điện thoại</b>
+    <li><a href="../../docs/vi/quick-start-android.md">Cài đặt trên Android (qua Termux)</a></li>
+    <br>
+    <b>⚙️ Dành cho Máy chủ & Nâng cao</b>
+    <li><a href="../../docs/vi/deploy-home-server.md">Triển khai trên VPS / Server Linux</a></li>
+    <li><a href="../../docs/vi/local-bot-api-setup.md">Cài đặt Local Bot API (Gửi file lớn 2GB)</a></li>
+    <li><a href="../../docs/vi/audit-report.md">Báo cáo Bảo mật & Audit</a></li>
   </ul>
 </details>
 
@@ -99,3 +111,37 @@ Khi có tin nhắn Zalo gửi đến, Bot sẽ tự động tạo một Topic (L
     *   Ví dụ: `[Tên Zalo của bạn] Tên Khách Hàng`
 *   **Trả lời tin nhắn**: Bạn chỉ cần Reply (trả lời) hoặc nhắn thẳng vào Topic đó. Bot đủ thông minh để biết Topic này thuộc về tài khoản Zalo nào và dùng đúng tài khoản đó để gửi tin nhắn đi.
 *   **Sử dụng lệnh trong Topic**: Bất kỳ lệnh nào gọi bên trong Topic (vd: `/history`) sẽ tự động được thực thi trên tài khoản Zalo tương ứng của Topic đó.
+
+---
+
+## 4. Sao lưu và Di chuyển Bot (Migration)
+
+Nếu bạn đang chạy bot trên một thiết bị (ví dụ: máy Mac) và muốn chuyển sang một thiết bị khác (ví dụ: VPS Linux hoặc điện thoại Android) mà không muốn phải đăng nhập lại hay mất liên kết của các Topic hiện tại, bạn chỉ cần thực hiện việc sao lưu đúng các file cốt lõi.
+
+### Những file bắt buộc phải giữ lại
+- **File `.env`**: Chứa thông tin cấu hình (Token, Group ID).
+- **Thư mục `sessions/`**: Chứa các file phiên đăng nhập Zalo:
+  - `credentials.json` và `app-session.json`: Giúp bạn không phải quét lại mã QR khi sang máy mới.
+- **Thư mục `data/`**: Chứa toàn bộ cơ sở dữ liệu của Bot, bao gồm:
+  - `topics.json`: Lưu bản đồ liên kết nhóm Zalo và Topic Telegram.
+  - `msg-map.json` (hoặc `msg-map.json.gz`): Lưu liên kết 2 chiều của tất cả tin nhắn (đảm bảo tính năng Reply và Thu hồi hoạt động).
+  - `user-cache.json.gz`: Lưu bộ nhớ đệm tên người dùng và UID.
+  - `polls.json.gz`: Lưu liên kết các bảng bình chọn (Poll) giữa Zalo và Telegram.
+
+### Những file tuyệt đối KHÔNG sao chép sang máy mới
+- **`node_modules/`** và **`dist/`**: Mã nguồn và thư viện được biên dịch riêng cho hệ điều hành/CPU cũ. Sao chép chúng sang máy mới có kiến trúc khác (như từ Mac sang Linux) sẽ gây lỗi sập bot ngay lập tức.
+
+### Quy trình "Chuyển nhà" an toàn
+1. **Trên thiết bị mới:** Cài đặt đầy đủ môi trường (Node.js, Git, FFmpeg) và clone mã nguồn về như một lượt cài đặt mới:
+   ```bash
+   git clone https://github.com/williamcachamwri/zalo-tg
+   cd zalo-tg
+   npm install
+   ```
+2. **Chuyển dữ liệu:** Sao chép file `.env`, thư mục `sessions/` và thư mục `data/` từ máy cũ sang thư mục `zalo-tg/` trên máy mới.
+3. **Khởi động:** Biên dịch lại mã nguồn và chạy bot:
+   ```bash
+   npm run build
+   npm start
+   ```
+Ngay khi khởi động, bot trên thiết bị mới sẽ nối lại kết nối cũ và tiếp tục chạy mượt mà.
