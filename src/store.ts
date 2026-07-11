@@ -655,11 +655,27 @@ const _aliasMap = new Map<string, string>();
 const _aliasNormToUid = new Map<string, string>();
 
 export const accountAliasStore = {
+  _getCombined(): Record<string, string> {
+    const combined = { ...(_data.accountAliases || {}) };
+    // Merge from config (.env)
+    if (config.zalo.accountAliases) {
+      Object.assign(combined, config.zalo.accountAliases);
+    }
+    // Merge from aliases.json if exists
+    try {
+      const aliasesPath = path.resolve(config.dataDir, '..', 'aliases.json');
+      if (existsSync(aliasesPath)) {
+        const fileData = JSON.parse(readFileSync(aliasesPath, 'utf8'));
+        Object.assign(combined, fileData);
+      }
+    } catch {}
+    return combined;
+  },
   get(accountId: string): string | undefined {
-    return _data.accountAliases ? _data.accountAliases[accountId] : undefined;
+    return this._getCombined()[accountId];
   },
   getAll(): Record<string, string> {
-    return _data.accountAliases || {};
+    return this._getCombined();
   },
   set(accountId: string, alias: string): void {
     if (!_data.accountAliases) _data.accountAliases = {};

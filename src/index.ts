@@ -326,7 +326,7 @@ async function main(): Promise<void> {
                 console.warn(`[Boot] Could not fetch profile for ${accountId}`);
               }
             }
-           const accountName = fetchedName || accountAliasStore.get(accountId) || accountNameStore.get(accountId) || 'Zalo';
+           const accountName = accountAliasStore.get(accountId) || fetchedName || accountNameStore.get(accountId) || 'Zalo';
            if (fetchedName) {
              accountNameStore.set(accountId, fetchedName);
            }
