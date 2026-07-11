@@ -166,7 +166,7 @@ async function startZalo(
               _reconnectInProgress = false;
             } else {
               // Retry on undefined (network error)
-              console.warn(`[Boot] Zalo reconnect failed (attempt ${attempt}). Retrying...`);
+              console.warn(`[Boot] Zalo (${accountName}) reconnect failed (attempt ${attempt}). Retrying...`);
               if (attempt === 1) {
                 tgBot.telegram.sendMessage(config.telegram.groupId, `🔄 <b>Zalo (${accountName})</b> kết nối lại thất bại. Đang thử lại liên tục trong nền...`, { parse_mode: 'HTML' }).catch(() => undefined);
               }
