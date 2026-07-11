@@ -14,6 +14,7 @@ import { store, accountAliasStore, accountNameStore } from './store.js';
 import { syncGroupHistory } from './zalo/historySync.js';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import path from 'path';
+import { startBackupWatcher } from './backup.js';
 
 let _errorTopicId: number | null = null;
 async function getErrorTopicId(): Promise<number | undefined> {
@@ -202,6 +203,7 @@ async function main(): Promise<void> {
   console.log('╚══════════════════════════════════════╝');
 
   startUpdateChecker(tgBot);
+  startBackupWatcher();
 
   tgBot.command('reconnect', async (ctx) => {
     if (ctx.chat.id !== config.telegram.groupId && ctx.chat.type !== 'private') return;
