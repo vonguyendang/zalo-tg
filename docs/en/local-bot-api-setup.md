@@ -1,5 +1,34 @@
 # Local Telegram Bot API Server Setup Guide
 
+<div align="center">
+  <strong>English</strong> | <a href="../vi/local-bot-api-setup.md">Tiếng Việt</a>
+</div>
+<br>
+<details>
+  <summary><b>📖 Documentation Menu</b></summary>
+  <ul>
+    <li><a href="../../README.md">🏠 Home (README)</a></li>
+    <li><a href="../../docs/en/user-guide.md">📖 Basic User Guide</a></li>
+    <br>
+    <b>🍎 For Mac Users (macOS)</b>
+    <li><a href="../../docs/en/quick-start-automation.md">Install via Automator (Zalo Bot Control)</a></li>
+    <li><a href="../../docs/en/quick-start-command.md">Install via Command</a></li>
+    <li><a href="../../docs/en/clamshell-mode-setup.md">Mac 24/7 Clamshell Mode Setup</a></li>
+    <br>
+    <b>🪟 For Windows Users</b>
+    <li><a href="../../docs/en/quick-start-windows.md">Windows Setup (Native & WSL)</a></li>
+    <br>
+    <b>📱 For Mobile Devices</b>
+    <li><a href="../../docs/en/quick-start-android.md">Android Setup (via Termux)</a></li>
+    <br>
+    <b>⚙️ For Servers & Advanced Users</b>
+    <li><a href="../../docs/en/deploy-home-server.md">Deploy on Linux VPS / Home Server</a></li>
+    <li><a href="../../docs/en/local-bot-api-setup.md">Local Bot API Setup (2GB Large Files)</a></li>
+  </ul>
+</details>
+
+---
+
 ## Overview
 
 The official Telegram Bot API (api.telegram.org) has a **20 MB file size limit** for downloads. To transfer files larger than 20 MB, you need to run a **local Telegram Bot API server** on your machine with the `--local` flag, which allows transfers up to **2 GB**.

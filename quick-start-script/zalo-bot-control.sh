@@ -1,11 +1,18 @@
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+echo "Called with args: $@" >> /tmp/zalo_control_debug.log
+exec >> /tmp/zalo_control_debug.log 2>&1
 
 LABEL="com.edwardfranklin.zalo-bot"
 APP_DIR="$HOME/.zalo-bot-control"
 RUN_SCRIPT="$APP_DIR/zalo-bot-run.sh"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/zalo-bot-control"
-PROJECT_DIR="/Volumes/MacintoshHD-Data/DATA/code/zalo-tg"
+if [[ -L "${BASH_SOURCE[0]}" ]]; then
+  SCRIPT_DIR="$(dirname "$(readlink "${BASH_SOURCE[0]}")")"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 SETTINGS_FILE="$APP_DIR/settings.conf"
 
 mkdir -p "$APP_DIR" "$HOME/Library/LaunchAgents" "$LOG_DIR"
@@ -14,6 +21,7 @@ mkdir -p "$APP_DIR" "$HOME/Library/LaunchAgents" "$LOG_DIR"
 
 load_settings() {
   LOG_RETENTION_DAYS=7
+  BOT_BRANCH="dev"
   if [[ -f "$SETTINGS_FILE" ]]; then
     # shellcheck source=/dev/null
     source "$SETTINGS_FILE"
@@ -23,10 +31,41 @@ load_settings() {
 save_settings() {
   cat > "$SETTINGS_FILE" <<EOF
 LOG_RETENTION_DAYS=$LOG_RETENTION_DAYS
+BOT_BRANCH="$BOT_BRANCH"
+PROJECT_DIR="$PROJECT_DIR"
 EOF
 }
 
 load_settings
+save_settings
+
+send_tg_notification() {
+  local raw_message="$1"
+  if [[ -f "$PROJECT_DIR/.env" ]]; then
+    local token chat_id
+    token=$(grep -E '^TG_TOKEN=' "$PROJECT_DIR/.env" | cut -d '=' -f2- | tr -d '"'\'' ' | tr -d '\r')
+    chat_id=$(grep -E '^TG_GROUP_ID=' "$PROJECT_DIR/.env" | cut -d '=' -f2- | tr -d '"'\'' ' | tr -d '\r')
+    if [[ -n "$token" && -n "$chat_id" ]]; then
+      python3 - <<PYEOF &
+import urllib.request, urllib.parse, json, sys
+data = json.dumps({
+  "chat_id": "$chat_id",
+  "text": """$raw_message""",
+  "parse_mode": "HTML"
+}).encode()
+req = urllib.request.Request(
+  "https://api.telegram.org/bot$token/sendMessage",
+  data=data,
+  headers={"Content-Type": "application/json"}
+)
+try:
+  urllib.request.urlopen(req, timeout=5)
+except Exception as e:
+  pass
+PYEOF
+    fi
+  fi
+}
 
 # ── Tự xóa log cũ ──────────────────────────────────────────────────────────────
 
@@ -49,7 +88,7 @@ set -euo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:\$PATH"
 
-PROJECT_DIR="/Volumes/MacintoshHD-Data/DATA/code/zalo-tg"
+PROJECT_DIR="$PROJECT_DIR"
 LOG_DIR="\$HOME/Library/Logs/zalo-bot-control"
 SETTINGS_FILE="\$HOME/.zalo-bot-control/settings.conf"
 
@@ -64,9 +103,9 @@ if [[ "\$LOG_RETENTION_DAYS" -gt 0 ]]; then
   echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Dọn log cũ hơn \${LOG_RETENTION_DAYS} ngày: xóa \${deleted} file." >> "\$LOG_DIR/cleanup.log"
 fi
 
-/usr/bin/git checkout dev >> "\$LOG_DIR/git.log" 2>&1
+if [[ -f "\$SETTINGS_FILE" ]]; then source "\$SETTINGS_FILE"; fi
+/usr/bin/git checkout "${BOT_BRANCH:-dev}" >> "\$LOG_DIR/git.log" 2>&1
 /usr/bin/pkill telegram-bot-api 2>/dev/null || true
-npm run build >> "\$LOG_DIR/build.log" 2>&1
 
 ./run-bot-api.sh >> "\$LOG_DIR/bot-api.log" 2>&1 &
 
@@ -128,126 +167,242 @@ is_loaded() {
 }
 
 start_bot() {
+  local silent="${1:-}"
   clean_old_logs
+  cd "$PROJECT_DIR" && npm run build >> "$LOG_DIR/build.log" 2>&1
   write_run_script
   write_plist
   launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
   launchctl bootstrap "gui/$(id -u)" "$PLIST"
   launchctl kickstart -k "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
-  osascript -e 'display dialog "Đã bật bot thành công.\n\nBot sẽ tự chạy khi bạn đăng nhập.\nLog cũ sẽ tự xóa theo lịch đã cấu hình." buttons {"OK"} default button "OK" with title "Zalo Bot Control"'
+  send_tg_notification "🚀 <b>Zalo Bridge đã khởi động</b>
+
+✅ Hệ thống đang hoạt động.
+🌐 Nhánh: <code>$BOT_BRANCH</code>
+📂 Thư mục: <code>$PROJECT_DIR</code>"
+  if [[ "$silent" != "silent" ]]; then
+    osascript -e 'tell me' -e 'activate' -e 'display dialog "Bot started successfully.\n\nIt will auto-run on login.\nOld logs will be cleaned up based on your settings." buttons {"OK"} default button "OK" with title "Zalo Bot Control"' -e 'end tell'
+  fi
 }
 
 stop_bot() {
+  local silent="${1:-}"
   launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
   /usr/bin/pkill -f "node dist/index.js" >/dev/null 2>&1 || true
   /usr/bin/pkill telegram-bot-api >/dev/null 2>&1 || true
-  osascript -e 'display dialog "Đã tắt bot." buttons {"OK"} default button "OK" with title "Zalo Bot Control"'
+  send_tg_notification "🛑 <b>Zalo Bridge đã dừng hoạt động.</b>
+
+❌ Bot hiện không nhận hoặc gửi bất kỳ tin nhắn nào.
+💡 Để khởi động lại, chọn <b>Start bot</b> hoặc <b>Restart bot</b> từ Menu Bar."
+  if [[ "$silent" != "silent" ]]; then
+    osascript -e 'tell me' -e 'activate' -e 'display dialog "Bot stopped." buttons {"OK"} default button "OK" with title "Zalo Bot Control"' -e 'end tell'
+  fi
 }
 
 restart_bot() {
+  local silent="${1:-}"
   launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
   /usr/bin/pkill -f "node dist/index.js" >/dev/null 2>&1 || true
   /usr/bin/pkill telegram-bot-api >/dev/null 2>&1 || true
   clean_old_logs
+  cd "$PROJECT_DIR" && npm run build >> "$LOG_DIR/build.log" 2>&1
   write_run_script
   write_plist
   launchctl bootstrap "gui/$(id -u)" "$PLIST"
   launchctl kickstart -k "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
-  osascript -e 'display dialog "Đã khởi động lại bot thành công." buttons {"OK"} default button "OK" with title "Zalo Bot Control"'
+  send_tg_notification "⏳ <b>Zalo Bridge đang khởi động lại...</b>
+
+🔄 Đang khởi tạo ứng dụng và chuẩn bị kết nối lại các tài khoản Zalo.
+⏱ Vui lòng đợi khoảng <b>15–30 giây</b> để bot sẵn sàng.
+
+<i>Bạn sẽ nhận được thông báo xác nhận khi bot hoạt động trở lại.</i>"
+  if [[ "$silent" != "silent" ]]; then
+    osascript -e 'tell me' -e 'activate' -e 'display dialog "Bot restarted successfully." buttons {"OK"} default button "OK" with title "Zalo Bot Control"' -e 'end tell'
+  fi
 }
 
 show_status() {
   if is_loaded; then
-    STATUS="ĐANG BẬT"
+    STATUS="RUNNING"
   else
-    STATUS="ĐANG TẮT"
+    STATUS="STOPPED"
   fi
+  
+  local clamshell_val
+  clamshell_val=$(pmset -g | grep -i "SleepDisabled" | awk '{print $2}')
+  local clamshell_status="OFF (Sleep bình thường)"
+  if [[ "$clamshell_val" == "1" ]]; then
+    clamshell_status="ON (Chống sleep 24/7)"
+  fi
+
+  send_tg_notification "ℹ️ <b>Kiểm tra Trạng thái:</b>\n\nBot: <b>$STATUS</b>\nClamshell Mode: <b>$clamshell_status</b>"
   osascript <<OSA
-display dialog "Trạng thái: $STATUS
+tell me
+activate
+display dialog "Bot Status: $STATUS
+Clamshell Mode: $clamshell_status
 
 Project: $PROJECT_DIR
 Log: $LOG_DIR
-Tự xóa log sau: $LOG_RETENTION_DAYS ngày" buttons {"OK"} default button "OK" with title "Zalo Bot Control"
+Auto-clean logs after: $LOG_RETENTION_DAYS days" buttons {"OK"} default button "OK" with title "Zalo Bot Control"
+end tell
 OSA
 }
 
 open_logs() {
-  open "$LOG_DIR"
+  open -a Finder "$LOG_DIR"
 }
 
 set_log_retention() {
   local current="$LOG_RETENTION_DAYS"
   local input
   input=$(osascript <<OSA
-set retentionDays to text returned of (display dialog "Nhập số ngày giữ log (0 = không tự xóa):
-
-Hiện tại: $current ngày" default answer "$current" buttons {"Hủy", "Lưu"} default button "Lưu" cancel button "Hủy" with title "Zalo Bot Control – Cấu hình Log")
+tell me
+activate
+set retentionDays to text returned of (display dialog "Enter number of days to keep logs (0 = disable auto-clean):\n\nCurrent: $current days" default answer "$current" buttons {"Cancel", "Save"} default button "Save" cancel button "Cancel" with title "Zalo Bot Control – Log Config")
 return retentionDays
+end tell
 OSA
   ) || return 0
 
   # Kiểm tra input là số nguyên không âm
   if ! [[ "$input" =~ ^[0-9]+$ ]]; then
-    osascript -e 'display dialog "Giá trị không hợp lệ. Vui lòng nhập số nguyên >= 0." buttons {"OK"} default button "OK" with title "Zalo Bot Control"'
+    osascript -e 'tell me' -e 'activate' -e 'display dialog "Invalid value. Please enter an integer >= 0." buttons {"OK"} default button "OK" with title "Zalo Bot Control"' -e 'end tell'
     return 1
   fi
 
   LOG_RETENTION_DAYS="$input"
   save_settings
 
+  send_tg_notification "⚙️ <b>Cấu hình Log:</b> Đã thiết lập tự động xóa log sau <b>$input</b> ngày."
+
   if [[ "$input" -eq 0 ]]; then
-    osascript -e 'display dialog "Đã tắt tự xóa log." buttons {"OK"} default button "OK" with title "Zalo Bot Control"'
+    osascript -e 'tell me' -e 'activate' -e 'display dialog "Auto-clean logs is disabled." buttons {"OK"} default button "OK" with title "Zalo Bot Control"' -e 'end tell'
   else
     osascript <<OSA
-display dialog "Đã lưu: tự xóa log sau $input ngày.
+tell me
+activate
+display dialog "Saved: auto-clean logs after $input days.
 
-Log cũ hơn $input ngày sẽ bị xóa mỗi lần bot khởi động." buttons {"OK"} default button "OK" with title "Zalo Bot Control"
+Logs older than $input days will be deleted on bot startup." buttons {"OK"} default button "OK" with title "Zalo Bot Control"
+end tell
 OSA
   fi
 }
 
+
+set_branch() {
+  local current="$BOT_BRANCH"
+  local input
+  input=$(osascript <<OSA
+tell me
+activate
+set branchName to text returned of (display dialog "Enter the branch name to run the bot:\n\nCurrent: $current" default answer "$current" buttons {"Cancel", "Save"} default button "Save" cancel button "Cancel" with title "Zalo Bot Control – Change Branch")
+return branchName
+end tell
+OSA
+  ) || return 0
+
+  if [[ -z "$input" ]]; then
+    osascript -e 'tell me' -e 'activate' -e 'display dialog "Branch name cannot be empty." buttons {"OK"} default button "OK" with title "Zalo Bot Control"' -e 'end tell'
+    return 1
+  fi
+
+  BOT_BRANCH="$input"
+  save_settings
+
+  send_tg_notification "🌿 <b>Cấu hình Nhánh:</b> Đã đổi sang nhánh mã nguồn <b>$BOT_BRANCH</b>.\n\n<i>Hệ thống sẽ áp dụng nhánh này khi khởi động.</i>"
+
+  osascript <<OSA
+tell me
+activate
+display dialog "Saved new branch: $BOT_BRANCH\n\nThe bot will be restarted with this branch." buttons {"OK"} default button "OK" with title "Zalo Bot Control"
+end tell
+OSA
+  restart_bot
+}
+
 clean_logs_now() {
   clean_old_logs
+  send_tg_notification "🧹 <b>Dọn dẹp Log:</b> Đã dọn sạch các file log cũ hơn <b>$LOG_RETENTION_DAYS</b> ngày."
   osascript <<OSA
-display dialog "Đã dọn xong log cũ hơn $LOG_RETENTION_DAYS ngày.
+tell me
+activate
+display dialog "Cleaned up logs older than $LOG_RETENTION_DAYS days.
 
-Xem chi tiết tại: cleanup.log" buttons {"OK"} default button "OK" with title "Zalo Bot Control"
+See details in: cleanup.log" buttons {"OK"} default button "OK" with title "Zalo Bot Control"
+end tell
 OSA
+}
+
+toggle_clamshell() {
+  local current
+  current=$(pmset -g | grep -i "SleepDisabled" | awk '{print $2}')
+  if [[ "$current" == "1" ]]; then
+    osascript -e 'do shell script "pmset -a disablesleep 0" with administrator privileges'
+    send_tg_notification "💻 <b>Clamshell Mode: TẮT</b>\n\nMáy Mac sẽ <i>Sleep</i> bình thường khi gập màn hình. Bot sẽ ngừng hoạt động khi máy ngủ."
+    osascript -e 'tell me' -e 'activate' -e 'display dialog "✅ Đã TẮT chế độ chống Sleep.\n\nMáy sẽ sleep bình thường khi gập màn hình." buttons {"OK"} default button "OK" with title "Zalo Bot Control"' -e 'end tell'
+  else
+    osascript -e 'do shell script "pmset -a disablesleep 1" with administrator privileges'
+    send_tg_notification "💻 <b>Clamshell Mode: BẬT</b>\n\nMáy Mac hiện đang chạy ở chế độ <b>24/7</b>. Bạn có thể gập màn hình mà bot vẫn hoạt động bình thường.\n\n⚠️ <i>Lưu ý: Hãy đảm bảo cắm sạc đầy đủ và tắt chế độ này nếu cất máy vào balo.</i>"
+    osascript -e 'tell me' -e 'activate' -e 'display dialog "✅ Đã BẬT chế độ chống Sleep 24/7.\n\nBây giờ bạn có thể gập màn hình mà máy vẫn tiếp tục chạy Bot.\n(Nhớ cắm sạc nhé!)" buttons {"OK"} default button "OK" with title "Zalo Bot Control"' -e 'end tell'
+  fi
 }
 
 show_help() {
   osascript <<OSA
-display dialog "Cách dùng:
-1. Chọn Bật bot để cài và chạy.
-2. Chọn Khởi động lại bot để nạp lại code mới / reset bot.
-3. Chọn Xem trạng thái để kiểm tra.
-4. Chọn Mở log để xem lỗi.
-5. Chọn Tắt bot để dừng.
-6. Chọn Cấu hình xóa log để đặt số ngày giữ log.
-7. Chọn Xóa log ngay để dọn log cũ thủ công." buttons {"OK"} default button "OK" with title "Zalo Bot Control"
+tell me
+activate
+display dialog "📌 HƯỚNG DẪN SỬ DỤNG:\n1. Start / Restart / Stop: Bật, tắt, hoặc khởi động lại bot.\n2. Show status / Open logs: Xem trạng thái và lỗi.\n3. Các config khác: Quản lý nhánh và dọn log.\n4. Toggle Clamshell Mode: Bật/tắt chế độ gập màn hình không tắt máy.\n\n⚠️ LƯU Ý QUAN TRỌNG KHI CHẠY 24/7:\n- Tự chạy khi bật máy: Hãy vào System Settings -> Users & Groups -> Bật 'Automatically log in' cho user này.\n- Cấp nguồn: Khi BẬT chống sleep (Clamshell Mode), bắt buộc Mac phải được cắm sạc.\n- Mang máy đi: NẾU BẠN CẤT MÁY VÀO BALO, BẮT BUỘC PHẢI TẮT 'Toggle Clamshell Mode' để máy được sleep bình thường. Nếu không máy sẽ bị hầm bí và quá nhiệt!" buttons {"OK"} default button "OK" with title "Zalo Bot Control"
+end tell
 OSA
 }
 
-# ── Menu chính ──────────────────────────────────────────────────────────────────
+# ── Menu chính hoặc gọi qua argument ──────────────────────────────────────────
+
+if [[ $# -gt 0 ]]; then
+  case "$1" in
+    start_bot)         start_bot ;;
+    start_bot_silent)  start_bot silent ;;
+    stop_bot)          stop_bot ;;
+    stop_bot_silent)   stop_bot silent ;;
+    restart_bot)       restart_bot ;;
+    restart_bot_silent)restart_bot silent ;;
+    show_status)       show_status ;;
+    open_logs)         open_logs ;;
+    set_log_retention) set_log_retention ;;
+    clean_logs_now)    clean_logs_now ;;
+    set_branch)        set_branch ;;
+    toggle_clamshell)  toggle_clamshell ;;
+    show_help)         show_help ;;
+    *)                 echo "Command not found: $1" ; exit 1 ;;
+  esac
+  exit 0
+fi
 
 CHOICE=$(osascript <<'OSA'
-set picked to choose from list {"Bật bot", "Khởi động lại bot", "Tắt bot", "Xem trạng thái", "Mở log", "Cấu hình xóa log", "Xóa log ngay", "Hướng dẫn"} with prompt "Chọn thao tác:" with title "Zalo Bot Control" default items {"Bật bot"} OK button name "Chọn" cancel button name "Thoát"
+tell me
+activate
+set picked to choose from list {"Start bot", "Restart bot", "Stop bot", "Show status", "Open logs", "Log retention config", "Clean logs now", "Branch config", "Toggle Clamshell Mode", "Help"} with prompt "Select an action:" with title "Zalo Bot Control" default items {"Start bot"} OK button name "Select" cancel button name "Quit"
 if picked is false then
-	return "Thoát"
+	return "Quit"
 else
 	return item 1 of picked
 end if
+end tell
 OSA
 )
 
 case "$CHOICE" in
-  "Bật bot")           start_bot ;;
-  "Khởi động lại bot") restart_bot ;;
-  "Tắt bot")           stop_bot ;;
-  "Xem trạng thái")    show_status ;;
-  "Mở log")            open_logs ;;
-  "Cấu hình xóa log")  set_log_retention ;;
-  "Xóa log ngay")      clean_logs_now ;;
-  "Hướng dẫn")         show_help ;;
-  *)                   exit 0 ;;
+  "Start bot")           start_bot ;;
+  "Restart bot")         restart_bot ;;
+  "Stop bot")            stop_bot ;;
+  "Show status")         show_status ;;
+  "Open logs")           open_logs ;;
+  "Log retention config")set_log_retention ;;
+  "Clean logs now")      clean_logs_now ;;
+  "Branch config")       set_branch ;;
+  "Toggle Clamshell Mode") toggle_clamshell ;;
+  "Help")                show_help ;;
+  *)                     exit 0 ;;
 esac

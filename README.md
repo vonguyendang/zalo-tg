@@ -26,7 +26,18 @@
 
 <br />
 
-> **Vietnamese documentation:** [README.vi.md](README.vi.md)
+<details>
+  <summary><b>📖 Documentation Menu</b></summary>
+  <ul align="left">
+    <li><a href="README.md">Home (README)</a></li>
+    <li><a href="docs/en/user-guide.md">User Guide</a></li>
+    <li><a href="docs/en/local-bot-api-setup.md">Local Bot API Setup</a></li>
+    <li><a href="docs/en/deploy-home-server.md">Home Server Deployment</a></li>
+    <li><a href="docs/en/quick-start-automation.md">Mac Quick Start - Automator</a></li>
+    <li><a href="docs/en/quick-start-command.md">Mac Quick Start - Command</a></li>
+    <li><a href="docs/en/clamshell-mode-setup.md">Mac 24/7 Clamshell Setup</a></li>
+  </ul>
+</details>
 
 <!-- Upstream Additions below -->
 
@@ -40,6 +51,8 @@
 - A Zalo account that can scan QR login
 - Optional: Docker / Docker Compose for the local Bot API setup
 
+<br>
+<strong>English</strong> | <a href="README.vi.md">Tiếng Việt</a>
 </div>
 
 ---
@@ -885,7 +898,7 @@ The official Telegram Bot API imposes restrictive file-size limits for bot downl
 
 ### Quick Start
 
-1. Build or download the local Telegram Bot API server. See [Local Bot API Setup Guide](LOCAL_BOT_API_SETUP.md).
+1. Build or download the local Telegram Bot API server. See [Local Bot API Setup Guide](docs/en/local-bot-api-setup.md).
 
 2. Log the bot out of the official Telegram Bot API once:
 
@@ -955,7 +968,7 @@ LOCAL_BOT_API=0
 - Preserves compatibility with older official-api `file_id` values through fallback logic.
 - Performs automatic cleanup of local files after successful delivery.
 
-For platform-specific setup instructions, including macOS, Linux, Windows, systemd, Windows Task Scheduler, and troubleshooting, see [Local Bot API Setup Guide](LOCAL_BOT_API_SETUP.md).
+For platform-specific setup instructions, including macOS, Linux, Windows, systemd, Windows Task Scheduler, and troubleshooting, see [Local Bot API Setup Guide](docs/en/local-bot-api-setup.md).
 
 > Vietnamese version: [Hướng dẫn thiết lập Local Bot API](LOCAL_BOT_API_SETUP.vi.md)
 

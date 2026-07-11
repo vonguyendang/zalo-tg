@@ -1,5 +1,35 @@
 # Hướng dẫn Thiết lập Local Telegram Bot API Server
 
+<div align="center">
+  <strong>Tiếng Việt</strong> | <a href="../en/local-bot-api-setup.md">English</a>
+</div>
+<br>
+<details>
+  <summary><b>📖 Menu Tài Liệu</b></summary>
+  <ul>
+    <li><a href="../../README.vi.md">🏠 Trang chủ (README)</a></li>
+    <li><a href="../../docs/vi/user-guide.md">📖 Hướng dẫn sử dụng cơ bản</a></li>
+    <br>
+    <b>🍎 Dành cho máy Mac (macOS)</b>
+    <li><a href="../../docs/vi/quick-start-automation.md">Cài đặt bằng Automator (Zalo Bot Control)</a></li>
+    <li><a href="../../docs/vi/quick-start-command.md">Cài đặt bằng Command</a></li>
+    <li><a href="../../docs/vi/clamshell-mode-setup.md">Thiết lập Mac gập màn hình chạy ngầm 24/7</a></li>
+    <br>
+    <b>🪟 Dành cho Windows</b>
+    <li><a href="../../docs/vi/quick-start-windows.md">Cài đặt trên Windows (Native & WSL)</a></li>
+    <br>
+    <b>📱 Dành cho Điện thoại</b>
+    <li><a href="../../docs/vi/quick-start-android.md">Cài đặt trên Android (qua Termux)</a></li>
+    <br>
+    <b>⚙️ Dành cho Máy chủ & Nâng cao</b>
+    <li><a href="../../docs/vi/deploy-home-server.md">Triển khai trên VPS / Server Linux</a></li>
+    <li><a href="../../docs/vi/local-bot-api-setup.md">Cài đặt Local Bot API (Gửi file lớn 2GB)</a></li>
+    <li><a href="../../docs/vi/audit-report.md">Báo cáo Bảo mật & Audit</a></li>
+  </ul>
+</details>
+
+---
+
 ## Tổng quan
 
 Telegram Bot API chính thức (api.telegram.org) có giới hạn kích thước tệp **20 MB** khi tải xuống. Để chuyển các tệp lớn hơn 20 MB, bạn cần chạy một **máy chủ Telegram Bot API cục bộ** trên máy của mình với cờ `--local`, cho phép chuyển đến **2 GB**.
