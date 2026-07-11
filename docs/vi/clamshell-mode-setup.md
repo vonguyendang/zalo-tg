@@ -19,12 +19,16 @@ Hệ thống bot đã được tối ưu mã nguồn. Để áp dụng:
 
 ### 1. Bật Tự động đăng nhập (Auto-login)
 > Đảm bảo bot tự chạy lại nếu máy Mac bị tắt nguồn và tự bật lên lại.
+> 
+> 💡 **Giải thích:** Tính năng này chỉ dùng để "bảo hiểm" khi mất điện hoặc máy khởi động lại sau khi cập nhật. Nếu bạn đặt máy chạy liên tục, không bao giờ tắt nguồn thì **không cần bật tính năng này**.
 - Mở **System Settings** > **Users & Groups** (Người dùng & Nhóm).
 - Tìm mục **Automatically log in as** (Tự động đăng nhập dưới dạng).
 - Chọn tài khoản của bạn và nhập mật khẩu để xác nhận.
 
 ### 2. Thiết lập Khóa màn hình (Lock Screen)
 > Đảm bảo máy tự động khóa lại khi gập màn hình để bảo mật dữ liệu.
+> 
+> 💡 **Giải thích:** Khi bật Clamshell Mode, máy Mac của bạn hoàn toàn KHÔNG NGỦ dù đã gập màn hình. Thiết lập "Ngay lập tức" đảm bảo ngay khi nắp máy đóng lại, hệ thống sẽ bị khóa trái. Ai mở nắp máy lên sẽ bị chặn ở màn hình nhập mật khẩu, ngăn chặn việc đánh cắp dữ liệu. Thiết lập này luôn hoạt động độc lập kể cả khi bạn không bật Auto-login.
 - Mở **System Settings** > **Lock Screen** (Màn hình khóa).
 - Đặt **Require password after screen saver begins or display is turned off** thành `Immediately` (Ngay lập tức).
 
