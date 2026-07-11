@@ -42,6 +42,9 @@ export function startBackupWatcher() {
     // Ignore temporary files used during safe writes
     if (filePath.endsWith('.tmp')) return;
 
+    // Ignore local telegram bot API server database (changes continuously)
+    if (filePath.includes('/bot-api/') || filePath.includes('\\bot-api\\')) return;
+
     const relativePath = path.relative(rootDir, filePath);
     changedFiles.add(relativePath);
 
