@@ -1790,6 +1790,37 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
     await ctx.reply(`📚 <b>Danh sách các lệnh hiện có:</b>\n\n${lines.join('\n')}\n\n💡 <i>Mẹo: Để xem hướng dẫn chi tiết và ví dụ của một lệnh cụ thể, hãy gõ <code>/help &lt;tên_lệnh&gt;</code> (VD: <code>/help search</code>)</i>`, { parse_mode: 'HTML' });
   });
 
+  tgBot.command('backup', async (ctx) => {
+    if (ctx.chat.id !== config.telegram.groupId) return;
+    
+    const waitMsg = await ctx.reply('⏳ Đang nén dữ liệu, vui lòng chờ...');
+    
+    try {
+      const AdmZip = (await import('adm-zip')).default;
+      const zip = new AdmZip();
+      
+      const fs = await import('fs');
+      if (fs.existsSync(config.dataDir)) {
+        zip.addLocalFolder(config.dataDir, 'data');
+      }
+      if (fs.existsSync(config.zalo.credentialsDir)) {
+        zip.addLocalFolder(config.zalo.credentialsDir, 'sessions');
+      }
+      
+      const zipBuffer = zip.toBuffer();
+      const filename = `zalo_tg_backup_${Date.now()}.zip`;
+      
+      await ctx.replyWithDocument({ source: zipBuffer, filename }, {
+        caption: '✅ <b>Backup thành công!</b>\n\n⚠️ <b>CẢNH BÁO:</b> File này chứa toàn bộ token truy cập vào Zalo của bạn. Tuyệt đối không chia sẻ hoặc forward file này cho bất kỳ ai!',
+        parse_mode: 'HTML'
+      });
+      await ctx.deleteMessage(waitMsg.message_id).catch(() => {});
+    } catch (err) {
+      await ctx.reply(`❌ Lỗi khi backup: ${String(err)}`);
+      await ctx.deleteMessage(waitMsg.message_id).catch(() => {});
+    }
+  });
+
   tgBot.command('whitelistbot', async (ctx) => {
     if (ctx.chat.id !== config.telegram.groupId) return;
     const text = ctx.message.text ?? '';

@@ -40,6 +40,7 @@ export const BOT_COMMANDS = [
   { command: 'whitelistbot',   description: 'Quản lý danh sách bot được phép gửi tin sang Zalo' },
   { command: 'seed',           description: 'Xem mã seed giải mã backup Zalo' },
   { command: 'sync_aliases',   description: 'Đồng bộ tên topic theo alias hiện tại' },
+  { command: 'backup',         description: 'Sao lưu thư mục data và sessions' },
 ];
 
 export const COMMAND_DETAILS: Record<string, string> = {
@@ -69,6 +70,7 @@ export const COMMAND_DETAILS: Record<string, string> = {
   'reconnect': 'Buộc kết nối lại (reconnect) Zalo bằng session cũ nếu chẳng may bị ngắt kết nối mà bot chưa tự khôi phục.\n\n<b>Ví dụ:</b>\n<code>/reconnect</code>',
   'setalias': 'Đặt bí danh (alias) dễ nhớ cho một tài khoản Zalo trong hệ thống multi-account.\n\n<b>Ví dụ:</b>\n<code>/setalias my_main_acc</code>',
   'whitelistbot': 'Quản lý danh sách các bot Telegram được phép gửi tin nhắn vào topic để đồng bộ sang Zalo.\n\n💡 <i>Mẹo lấy ID Bot: ID của bot chính là dãy số nằm ở phần đầu Token của bot đó (trước dấu <code>:</code>). VD Token là <code>123456789:ABC...</code> thì ID là <code>123456789</code>. Bạn cũng có thể dùng @userinfobot để xem.</i>\n\n<b>Tham số:</b> list | add &lt;id&gt; | remove &lt;id&gt;\n<b>Ví dụ:</b>\n<code>/whitelistbot list</code> - Xem danh sách bot\n<code>/whitelistbot add 123456789</code> - Thêm bot ID 123456789\n<code>/whitelistbot remove 123456789</code> - Xóa bot',
+  'backup': 'Sao lưu toàn bộ thư mục dữ liệu (data) và phiên đăng nhập (sessions) thành file nén zip và gửi vào nhóm Telegram.\n\n<b>Ví dụ:</b>\n<code>/backup</code>',
 };
 
 let agentToUse: https.Agent | http.Agent = agent;
