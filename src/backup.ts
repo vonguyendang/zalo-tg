@@ -93,9 +93,14 @@ async function performBackup(changedFilesList: string[]) {
   addTarget(path.resolve(rootDir, 'aliases.json'), 'aliases.json');
   addTarget(path.resolve(rootDir, '.env'), '.env');
 
-  const buffer = zip.toBuffer();
+  const backupDir = path.resolve(rootDir, 'data', 'backups');
+  if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+  
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const filename = `backup-${timestamp}.zip`;
+  const backupPath = path.join(backupDir, filename);
+  
+  zip.writeZip(backupPath);
 
   let caption = '📦 <b>Auto Backup</b>\n\nCác file cấu hình và dữ liệu (data, sessions, aliases.json, .env) đã có sự thay đổi.';
   if (changedFilesList.length > 0) {
@@ -107,13 +112,26 @@ async function performBackup(changedFilesList: string[]) {
     caption += `\n\n<b>Chi tiết thay đổi:</b>\n${items.join('\n')}`;
   }
 
-  await tgBot.telegram.sendDocument(config.telegram.groupId, {
-    source: buffer,
-    filename: filename
-  }, {
-    caption: caption,
-    parse_mode: 'HTML'
-  });
+  try {
+    await tgBot.telegram.sendDocument(config.telegram.groupId, 'file://' + backupPath, {
+      caption: caption,
+      parse_mode: 'HTML'
+    });
+    console.log(`[Backup] Backup sent to Telegram: ${filename}`);
+  } catch (err) {
+    console.error('[Backup] Failed to send backup to Telegram:', err);
+  }
   
-  console.log(`[Backup] Backup sent to Telegram: ${filename}`);
+  // Cleanup old backups (keep last 3)
+  try {
+    const files = fs.readdirSync(backupDir)
+      .filter(f => f.startsWith('backup-') && f.endsWith('.zip'))
+      .sort()
+      .reverse();
+    for (let i = 3; i < files.length; i++) {
+      fs.unlinkSync(path.join(backupDir, files[i]));
+    }
+  } catch (e) {
+    console.error('[Backup] Failed to cleanup old backups:', e);
+  }
 }

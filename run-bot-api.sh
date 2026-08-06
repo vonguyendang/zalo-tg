@@ -8,4 +8,4 @@ exec telegram-bot-api \
   --dir="$PROJECT_DIR/data/bot-api" \
   --temp-dir=/tmp \
   --http-port=8081 \
-  --verbosity=1
+  --verbosity=1 >> "$PROJECT_DIR/data/bot-api.log" 2>&1

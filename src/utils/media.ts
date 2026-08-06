@@ -86,9 +86,34 @@ export async function downloadToTemp(url: string, fileName?: string, retries = 3
 
       await new Promise<void>((resolve, reject) => {
         const writer = createWriteStream(filePath);
+        
+        let streamTimeout: NodeJS.Timeout | undefined;
+        const resetStreamTimeout = () => {
+          if (streamTimeout) clearTimeout(streamTimeout);
+          streamTimeout = setTimeout(() => {
+            (resp.data as any).destroy(); // Abort the incoming stream
+            reject(new Error('Stream stalled during download'));
+          }, 30_000);
+        };
+        
+        resetStreamTimeout(); // Start timeout immediately in case no data is ever sent
+        resp.data.on('data', resetStreamTimeout);
+        resp.data.on('error', (err) => {
+          if (streamTimeout) clearTimeout(streamTimeout);
+          reject(err);
+        });
+
         resp.data.pipe(writer);
-        writer.on('finish', resolve);
-        writer.on('error', reject);
+        writer.on('finish', () => {
+          if (streamTimeout) clearTimeout(streamTimeout);
+          resolve();
+        });
+        writer.on('error', (err) => {
+          if (streamTimeout) clearTimeout(streamTimeout);
+          reject(err);
+        });
+        
+        resetStreamTimeout();
       });
 
       const { size } = await stat(filePath);

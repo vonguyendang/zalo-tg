@@ -309,13 +309,13 @@ async function sendHistoryMsg(
         const stream = createReadStream(localPath);
         try {
           const sent = await tg.sendSticker(
-            config.telegram.groupId, { source: stream },
+            config.telegram.groupId, 'file://' + localPath,
             tgBase as Parameters<typeof tg.sendSticker>[2],
           );
           saveTgMapping(sent);
         } catch {
           const stream2 = createReadStream(localPath);
-          const sent = await tg.sendPhoto(config.telegram.groupId, { source: stream2 }, tgOpts);
+          const sent = await tg.sendPhoto(config.telegram.groupId, 'file://' + localPath, tgOpts);
           saveTgMapping(sent);
         }
       } finally { await cleanTemp(localPath); }

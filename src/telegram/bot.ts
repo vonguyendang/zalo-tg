@@ -88,6 +88,8 @@ export const tgBot = new Telegraf(config.telegram.token, {
     : { agent: agentToUse },
 });
 
+export const tgLocal = tgBot.telegram;
+
 // Keep polling alive when one update handler fails. Without an explicit catch,
 // Telegraf can reject launch() and leave the process half-alive: Zalo→Telegram
 // listeners still work while Telegram→Zalo silently stops consuming updates.
