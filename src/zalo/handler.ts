@@ -778,12 +778,36 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         }
         return undefined;
       })();
-      const _extGuess = _eagerMediaUrl
-        ? (path.extname(_eagerMediaUrl.split('?')[0] ?? '').toLowerCase() || '.bin')
-        : '.bin';
+      let eagerFileName = media.title?.trim() || `dl_${Date.now()}`;
+      let hasExt = false;
+      if (media.params) {
+        try {
+          const params = JSON.parse(media.params);
+          if (params.fileExt) {
+            const ext = '.' + params.fileExt.toLowerCase();
+            if (!eagerFileName.toLowerCase().endsWith(ext)) eagerFileName += ext;
+            hasExt = true;
+          }
+        } catch (e) { /* ignore */ }
+      }
+      if (!hasExt && _eagerMediaUrl) {
+        const urlExt = path.extname(_eagerMediaUrl.split('?')[0] ?? '').toLowerCase();
+        if (urlExt && urlExt !== '.') {
+          if (!eagerFileName.toLowerCase().endsWith(urlExt)) eagerFileName += urlExt;
+          hasExt = true;
+        }
+      }
+      if (!hasExt) {
+        if (msgType === ZALO_MSG_TYPES.PHOTO) eagerFileName += '.jpg';
+        else if (msgType === ZALO_MSG_TYPES.VIDEO) eagerFileName += '.mp4';
+        else if (msgType === ZALO_MSG_TYPES.VOICE) eagerFileName += '.m4a';
+        else if (msgType === ZALO_MSG_TYPES.GIF) eagerFileName += '.mp4';
+        else eagerFileName += '.bin';
+      }
+
       // Start download immediately; we'll await it inside the type-specific branch
       const earlyDlPromise = _eagerMediaUrl
-        ? downloadToTemp(_eagerMediaUrl, `dl_${Date.now()}${_extGuess}`)
+        ? downloadToTemp(_eagerMediaUrl, eagerFileName)
         : null;
 
       // Resolve display name:
