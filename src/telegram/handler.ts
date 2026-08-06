@@ -288,18 +288,24 @@ async function handleLoginCommand(
 
     const newApi = await triggerQRLogin({
       onQRReady: async (imagePath) => {
-        await tgBot.telegram.sendPhoto(
-          chatId,
-          { source: createReadStream(imagePath) },
-          {
-            ...msgOpts,
-            caption: '📱 Mở ứng dụng <b>Zalo</b> → Cài đặt → Quét mã QR để đăng nhập.',
-            parse_mode: 'HTML',
-            reply_markup: {
-              inline_keyboard: [[{ text: '❌ Hủy đăng nhập', callback_data: `login_cancel:qr:active` }]]
-            }
-          },
-        );
+        try {
+          const form = new (require('form-data'))();
+          form.append('chat_id', chatId);
+          form.append('photo', createReadStream(imagePath));
+          if (threadId) form.append('message_thread_id', threadId);
+          form.append('caption', '📱 Mở ứng dụng <b>Zalo</b> → Cài đặt → Quét mã QR để đăng nhập.');
+          form.append('parse_mode', 'HTML');
+          form.append('reply_markup', JSON.stringify({
+            inline_keyboard: [[{ text: '❌ Hủy đăng nhập', callback_data: `login_cancel:qr:active` }]]
+          }));
+          
+          await require('axios').post(`https://api.telegram.org/bot${config.telegram.token}/sendPhoto`, form, {
+            headers: form.getHeaders(),
+          });
+        } catch (uploadErr) {
+          console.error('Lỗi gửi ảnh QR:', uploadErr);
+          await tgBot.telegram.sendMessage(chatId, '❌ Không thể gửi ảnh QR lên Telegram. Vui lòng kiểm tra log.', msgOpts);
+        }
       },
       onExpired: async () => {
         await tgBot.telegram.sendMessage(chatId, '⏰ QR hết hạn, đang tạo mã mới...', msgOpts);
@@ -440,18 +446,24 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
 
       const newApi = await triggerAppLogin({
         onQRReady: async (imagePath) => {
-          await tgBot.telegram.sendPhoto(
-            chatId,
-            { source: createReadStream(imagePath) },
-            {
-              ...msgOpts,
-              caption: '📱 Mở ứng dụng <b>Zalo</b> → Cài đặt → Quét mã QR để đăng nhập.',
-              parse_mode: 'HTML',
-              reply_markup: {
-                inline_keyboard: [[{ text: '❌ Hủy đăng nhập', callback_data: `login_cancel:app:active` }]]
-              }
-            },
-          );
+          try {
+            const form = new (require('form-data'))();
+            form.append('chat_id', chatId);
+            form.append('photo', createReadStream(imagePath));
+            if (threadId) form.append('message_thread_id', threadId);
+            form.append('caption', '📱 Mở ứng dụng <b>Zalo</b> → Cài đặt → Quét mã QR để đăng nhập.');
+            form.append('parse_mode', 'HTML');
+            form.append('reply_markup', JSON.stringify({
+              inline_keyboard: [[{ text: '❌ Hủy đăng nhập', callback_data: `login_cancel:app:active` }]]
+            }));
+            
+            await require('axios').post(`https://api.telegram.org/bot${config.telegram.token}/sendPhoto`, form, {
+              headers: form.getHeaders(),
+            });
+          } catch (uploadErr) {
+            console.error('Lỗi gửi ảnh QR (app):', uploadErr);
+            await tgBot.telegram.sendMessage(chatId, '❌ Không thể gửi ảnh QR lên Telegram. Vui lòng kiểm tra log.', msgOpts);
+          }
         },
         onScanned: async () => {
           await tgBot.telegram.sendMessage(chatId, '✅ Đã quét! Đang lấy thông tin đăng nhập...', msgOpts);
