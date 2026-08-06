@@ -833,7 +833,9 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
       if (msgTs > 0 && Date.now() - msgTs > 60_000) {
         const d = new Date(msgTs);
         const pad = (n: number) => n.toString().padStart(2, '0');
-        delaySuffix = `\n\n<i>(⏳ Gửi lúc: ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ${pad(d.getDate())}/${pad(d.getMonth() + 1)})</i>`;
+        const days = ['Chủ Nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
+        const dayOfWeek = days[d.getDay()];
+        delaySuffix = `\n\n<i>(⏳ Gửi lúc: ${dayOfWeek}, ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())})</i>`;
       }
 
       const caption = groupCaption(bridgeSenderName) + delaySuffix;
