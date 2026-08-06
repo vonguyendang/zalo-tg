@@ -3219,6 +3219,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
                 width:        vid.width,
                 height:       vid.height,
                 duration:     (vid.duration ?? 0) * 1000,
+                fileSize:     vid.file_size ?? 0,
                 msg:          cap ?? '',
               },
               zaloId,

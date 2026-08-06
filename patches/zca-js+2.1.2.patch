@@ -20,6 +20,39 @@ index ce5d95e..b734125 100644
                      const parsedData = (await decodeEventData(parsed, this.cipherKey)).data;
                      const { groupMsgs } = parsedData;
                      for (const msg of groupMsgs) {
+diff --git a/node_modules/zca-js/dist/apis/sendVideo.d.ts b/node_modules/zca-js/dist/apis/sendVideo.d.ts
+index 23306ee..eedea31 100644
+--- a/node_modules/zca-js/dist/apis/sendVideo.d.ts
++++ b/node_modules/zca-js/dist/apis/sendVideo.d.ts
+@@ -16,6 +16,7 @@ export type SendVideoOptions = {
+      * Video duration in milliseconds || Eg: video duration: 5.5s => 5.5 * 1000 = 5500
+      */
+     duration?: number;
++    fileSize?: number;
+     /**
+      * Width of the video
+      */
+diff --git a/node_modules/zca-js/dist/apis/sendVideo.js b/node_modules/zca-js/dist/apis/sendVideo.js
+index 03c818c..a94c75f 100644
+--- a/node_modules/zca-js/dist/apis/sendVideo.js
++++ b/node_modules/zca-js/dist/apis/sendVideo.js
+@@ -31,9 +31,13 @@ export const sendVideoFactory = apiFactory()((api, ctx, utils) => {
+         let fileSize = 0;
+         const clientId = Date.now();
+         try {
+-            const headResponse = await utils.request(options.videoUrl, { method: "HEAD" }, true);
+-            if (headResponse.ok) {
+-                fileSize = parseInt(headResponse.headers.get("content-length") || "0");
++            if (options.fileSize) {
++                fileSize = options.fileSize;
++            } else {
++                const headResponse = await utils.request(options.videoUrl, { method: "HEAD" }, true);
++                if (headResponse.ok) {
++                    fileSize = parseInt(headResponse.headers.get("content-length") || "0");
++                }
+             }
+         }
+         catch (error) {
 diff --git a/node_modules/zca-js/dist/cjs/apis/listen.cjs b/node_modules/zca-js/dist/cjs/apis/listen.cjs
 index 92ab353..0ba3576 100644
 --- a/node_modules/zca-js/dist/cjs/apis/listen.cjs
