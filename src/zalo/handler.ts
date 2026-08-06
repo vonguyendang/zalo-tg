@@ -633,12 +633,28 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
   } catch (err) {
     console.warn('[Zalo] Failed to load address-book names:', err);
   }
+  api.listener.on('closed', (code: any, reason: any) => {
+    console.warn(`[ZaloHandler] Socket closed for ${accountName} (${accountId}): code=${code} reason=${reason}`);
+    tg.sendMessage(config.telegram.groupId, `⚠️ <b>Cảnh báo Zalo mất kết nối</b>\n\nTài khoản <b>${accountName}</b> vừa bị Zalo ngắt kết nối nhận tin nhắn.\n\n<i>Mã lỗi: ${code} - ${reason}</i>\n\n💡 <b>Cách khắc phục:</b> Hãy dùng lệnh /login hoặc /loginapp để đăng nhập lại nhằm làm mới phiên!`, { parse_mode: 'HTML' }).catch(console.error);
+  });
+
+  api.listener.on('disconnected', (code: any, reason: any) => {
+    console.warn(`[ZaloHandler] Socket disconnected for ${accountName} (${accountId}): code=${code} reason=${reason}`);
+  });
+
+  api.listener.on('error', (err: any) => {
+    console.error(`[ZaloHandler] Socket error for ${accountName} (${accountId}):`, err);
+  });
 
   api.listener.on('message', (msg: ZaloMessage) => {
+    console.log(`[ZaloHandler DEBUG] Received raw msg event: threadId=${msg.threadId} msgType=${msg.data?.msgType} isSelf=${msg.isSelf} acc=${accountId}`);
     const queueKey = `${accountId}:${msg.threadId}`;
     const currentPromise = _messageQueues.get(queueKey) || Promise.resolve();
     
-    const nextPromise = currentPromise.then(async () => {
+    // Ensure the chain never breaks if a previous promise unexpectedly rejects
+    const nextPromise = currentPromise.catch((err) => {
+      console.error(`[ZaloHandler] Queue rejection for ${queueKey}:`, err);
+    }).then(async () => {
       try {
       // Skip TG→Zalo echo (re-emitted by Zalo server) but forward
       // real self messages sent directly from the Zalo app.
