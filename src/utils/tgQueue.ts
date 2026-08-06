@@ -66,7 +66,7 @@ async function runOne(item: QueueItem, isText: boolean): Promise<void> {
     let timeoutId: NodeJS.Timeout | null = null;
     const timeoutPromise = new Promise<never>((_, reject) => {
       // 10 minutes timeout to allow large file uploads (up to 2GB)
-      timeoutId = setTimeout(() => reject(new Error('TG_API_TIMEOUT: Local bot API server hung')), 10000); // Reduce to 10 seconds for testing!
+      timeoutId = setTimeout(() => reject(new Error('TG_API_TIMEOUT: Local bot API server hung')), 600000);
     });
 
     console.log(`[tgQueue] Starting execution. isText=${isText}`);
