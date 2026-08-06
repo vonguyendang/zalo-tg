@@ -1,5 +1,5 @@
 import { Telegraf } from 'telegraf';
-const bot = new Telegraf('8208837233:AAGxQOlxYLRKOZUnxAwzHAp48pnxoyIWO8w', {
+const bot = new Telegraf(process.env.BOT_TOKEN, {
   telegram: { apiRoot: 'http://localhost:8081' }
 });
 bot.telegram.sendDocument(-1003968219458, 'file:///tmp/zalo-tg/test.jpg', { message_thread_id: 11 })

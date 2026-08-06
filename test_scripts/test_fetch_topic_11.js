@@ -1,6 +1,6 @@
 import fetch from 'node-fetch';
 async function run() {
-  const token = '8208837233:AAGxQOlxYLRKOZUnxAwzHAp48pnxoyIWO8w';
+  const token = process.env.BOT_TOKEN;
   const groupId = -1003968219458;
   const topicId = 11;
   const url = `http://localhost:8081/bot${token}/getUpdates?allowed_updates=["message"]`;

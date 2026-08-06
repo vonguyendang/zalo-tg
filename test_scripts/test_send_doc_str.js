@@ -1,6 +1,6 @@
 import { Telegraf } from 'telegraf';
 import path from 'path';
-const bot = new Telegraf('8208837233:AAGxQOlxYLRKOZUnxAwzHAp48pnxoyIWO8w', {
+const bot = new Telegraf(process.env.BOT_TOKEN, {
   telegram: { apiRoot: 'http://localhost:8081' }
 });
 async function run() {

@@ -1,7 +1,7 @@
 import { Telegraf } from 'telegraf';
 import fs from 'fs';
 import { execSync } from 'child_process';
-const bot = new Telegraf('8208837233:AAGxQOlxYLRKOZUnxAwzHAp48pnxoyIWO8w', {
+const bot = new Telegraf(process.env.BOT_TOKEN, {
   telegram: { apiRoot: 'http://localhost:8081' }
 });
 execSync('curl -s https://photo-stal-24.zdn.vn/no/jpg/a7652ec625c4e39abad5/2aOboQpdd0I1X4pXncTvunHxSq7ojzOSZvMat160.jpg -o /tmp/test_real_photo.jpg');
