@@ -855,7 +855,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
 
       const msgTs = Number(msg.data.ts || 0);
       let delaySuffix = '';
-      if (msgTs > 0 && Date.now() - msgTs > 60_000) {
+      if (msgTs > 0) {
         const d = new Date(msgTs);
         const pad = (n: number) => n.toString().padStart(2, '0');
         const days = ['Chủ Nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
