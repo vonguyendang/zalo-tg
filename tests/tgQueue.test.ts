@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tgQueue } from '../src/utils/tgQueue.js';
+import { tgMediaQueue as tgQueue } from '../src/utils/tgQueue.js';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-test('tgQueue limits concurrent Telegram calls to five and preserves all results', async () => {
+test('tgMediaQueue limits concurrent Telegram calls to five and preserves all results', async () => {
   let active = 0;
   let maxActive = 0;
   let started = 0;
@@ -35,7 +35,7 @@ test('tgQueue limits concurrent Telegram calls to five and preserves all results
   assert.equal(maxActive, 5);
 });
 
-test('tgQueue propagates non-rate-limit errors without retrying', async () => {
+test('tgMediaQueue propagates non-rate-limit errors without retrying', async () => {
   let attempts = 0;
   const error = new Error('permanent');
   await assert.rejects(
@@ -48,7 +48,7 @@ test('tgQueue propagates non-rate-limit errors without retrying', async () => {
   assert.equal(attempts, 1);
 });
 
-test('tgQueue retries Telegram 429 responses', async () => {
+test('tgMediaQueue retries Telegram 429 responses', async () => {
   let attempts = 0;
   const result = await tgQueue(async () => {
     attempts++;
