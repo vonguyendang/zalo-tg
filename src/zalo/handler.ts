@@ -417,6 +417,10 @@ async function maybeRenameExistingDmTopic(
     console.log(`[Zalo→TG] Renamed DM topic for ${zaloId}: "${entry.name}" → "${displayName}" (with prefix)`);
   } catch (err) {
     if (isTopicDeletedError(err)) throw err;
+    if (String(err).includes('TOPIC_NOT_MODIFIED')) {
+      store.updateName(topicId, displayName);
+      return;
+    }
     console.warn(`[Zalo→TG] Failed to rename DM topic ${topicId} for ${zaloId}:`, err);
   }
 }
