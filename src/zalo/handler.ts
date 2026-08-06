@@ -860,7 +860,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         const pad = (n: number) => n.toString().padStart(2, '0');
         const days = ['Chủ Nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
         const dayOfWeek = days[d.getDay()];
-        timeSuffix = ` [Time: ${dayOfWeek}, ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}]`;
+        timeSuffix = ` <i>[${dayOfWeek}, ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}]</i>`;
       }
 
       const caption = groupCaption(bridgeSenderName, timeSuffix);
