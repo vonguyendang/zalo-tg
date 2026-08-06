@@ -1135,7 +1135,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         try {
           const sent = await tg.sendDocument(
             config.telegram.groupId,
-            { source: localPath, filename: fileName },
+            'file://' + localPath,
             tgOpts,
           );
           saveTgMapping(sent);
@@ -1150,7 +1150,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         const localPath = await (earlyDlPromise ?? downloadToTemp(url, `video_${Date.now()}.mp4`));
         const fileName = media.title?.trim() || `video_${Date.now()}.mp4`;
         try {
-          const sent = await tg.sendVideo(config.telegram.groupId, { source: localPath, filename: fileName }, tgOpts);
+          const sent = await tg.sendVideo(config.telegram.groupId, 'file://' + localPath, tgOpts);
           saveTgMapping(sent);
         } finally { await cleanTemp(localPath); }
         return;

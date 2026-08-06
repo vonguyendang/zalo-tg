@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { createWriteStream, mkdirSync, copyFileSync } from 'fs';
-import { readFile, stat, unlink, writeFile } from 'fs/promises';
+import { readFile, stat, unlink, writeFile, rmdir } from 'fs/promises';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { gunzipSync } from 'zlib';
@@ -43,7 +43,10 @@ export async function downloadToTemp(url: string, fileName?: string, retries = 3
   if (url.startsWith('file:')) {
     const srcPath = fileURLToPath(url);
     const baseName = sanitizeFileName(fileName ?? path.basename(srcPath));
-    const destPath = path.join(TMP_DIR, `${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${baseName}`);
+    const uid = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const destDir = path.join(TMP_DIR, uid);
+    mkdirSync(destDir, { recursive: true });
+    const destPath = path.join(destDir, baseName);
     try {
       copyFileSync(srcPath, destPath);
     } catch (err) {
@@ -76,7 +79,10 @@ export async function downloadToTemp(url: string, fileName?: string, retries = 3
       await new Promise(r => setTimeout(r, 500 * attempt * attempt));
     }
 
-    const filePath = path.join(TMP_DIR, `${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${baseName}`);
+    const uid = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const destDir = path.join(TMP_DIR, uid);
+    mkdirSync(destDir, { recursive: true });
+    const filePath = path.join(destDir, baseName);
     try {
       const resp = await axios.get<NodeJS.ReadableStream>(url, {
         responseType: 'stream',
@@ -162,7 +168,13 @@ export async function downloadToTempFromCandidates(
 
 /** Remove a temp file, ignoring errors. */
 export async function cleanTemp(filePath: string): Promise<void> {
-  try { await unlink(filePath); } catch { /* ignore */ }
+  try {
+    await unlink(filePath);
+    const dir = path.dirname(filePath);
+    if (dir !== TMP_DIR) {
+      await rmdir(dir).catch(() => undefined);
+    }
+  } catch { /* ignore */ }
 }
 
 /** Split Telegram album payloads without ever producing an invalid >10 batch. */

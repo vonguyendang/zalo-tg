@@ -261,7 +261,7 @@ async function sendHistoryMsg(
     if (!url) return void saveTgMapping({ message_id: 0 });
     const localPath = await downloadToTemp(url, fileName);
     try {
-      const sent = await tg.sendDocument(config.telegram.groupId, { source: createReadStream(localPath), filename: fileName }, tgOpts);
+      const sent = await tg.sendDocument(config.telegram.groupId, 'file://' + localPath, tgOpts);
       saveTgMapping(sent);
     } finally { await cleanTemp(localPath); }
     return;
@@ -274,7 +274,7 @@ async function sendHistoryMsg(
     const fileName = media.title?.trim() || `hist_video_${Date.now()}.mp4`;
     const localPath = await downloadToTemp(url, fileName);
     try {
-      const sent = await tg.sendDocument(config.telegram.groupId, { source: createReadStream(localPath), filename: fileName }, tgOpts);
+      const sent = await tg.sendDocument(config.telegram.groupId, 'file://' + localPath, tgOpts);
       saveTgMapping(sent);
     } finally { await cleanTemp(localPath); }
     return;
