@@ -580,6 +580,9 @@ function buildScoreText(header: string, options: Pick<PollOptions, 'content' | '
 /** Track which groups already had their member cache populated this session. */
 const _memberCacheLoaded = new Set<string>();
 
+/** Queue to ensure messages from the same thread are processed sequentially */
+const _messageQueues = new Map<string, Promise<void>>();
+
 export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountName: string): Promise<void> {
   // Pre-populate userCache for all existing group topics on startup.
   // Stagger calls by 2 s each to avoid triggering the rate limiter (code 221).
@@ -631,8 +634,12 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
     console.warn('[Zalo] Failed to load address-book names:', err);
   }
 
-  api.listener.on('message', async (msg: ZaloMessage) => {
-    try {
+  api.listener.on('message', (msg: ZaloMessage) => {
+    const queueKey = `${accountId}:${msg.threadId}`;
+    const currentPromise = _messageQueues.get(queueKey) || Promise.resolve();
+    
+    const nextPromise = currentPromise.then(async () => {
+      try {
       // Skip TG→Zalo echo (re-emitted by Zalo server) but forward
       // real self messages sent directly from the Zalo app.
       if (msg.isSelf) {
@@ -1609,6 +1616,8 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         console.error('[ZaloHandler] Error:', err);
       }
     }
+    });
+    _messageQueues.set(queueKey, nextPromise);
   });
 
   // Catch-up stream from zca-js after reconnect.
