@@ -704,9 +704,9 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
           return;
         }
         msgStore.markInFlight(accountId, _primaryMsgId);
-        // Auto-remove from in-flight after 10 s (msgStore.save will be the permanent record)
-        setTimeout(() => msgStore.unmarkInFlight(accountId, _primaryMsgId), 10_000);
+        // Will be unmarked in the finally block of the queue promise
       }
+
 
       const zaloId = msg.threadId;
       const type = msg.type as 0 | 1;
@@ -1632,9 +1632,12 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         console.error('[ZaloHandler] Error:', err);
       }
     }
+    }).finally(() => {
+      if (msg.data?.msgId) msgStore.unmarkInFlight(accountId, msg.data.msgId);
     });
     _messageQueues.set(queueKey, nextPromise);
   });
+
 
   // Catch-up stream from zca-js after reconnect.
   // Replays recent messages through the same main handler to refill bridges.

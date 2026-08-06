@@ -1,0 +1,2 @@
+1. Modify src/zalo/handler.ts to NOT use `setTimeout` for `unmarkInFlight`.
+2. Move `unmarkInFlight` into the `.finally()` or `.then()` of the `nextPromise` so that the message stays in-flight until it is fully processed (either successfully saved to msgStore or failed).
