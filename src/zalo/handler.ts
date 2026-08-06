@@ -1125,12 +1125,23 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
       // ── 4. File ────────────────────────────────────────────────────────────
       if (msgType === ZALO_MSG_TYPES.FILE) {
         const url = media.href;
-        // title holds the original filename (e.g. "report.pdf")
-        const fileName = media.title ?? `file_${Date.now()}`;
-        if (!url) {
-          console.warn('[ZaloHandler] File: no URL found in content:', media);
-          return;
+        if (!url) { console.warn('[ZaloHandler] File: no URL found in content:', media); return; }
+        
+        let fileName = media.title?.trim() || `file_${Date.now()}`;
+        
+        // Zalo sometimes drops the extension from title. Restore it from params to avoid .bin on Telegram
+        if (media.params) {
+          try {
+            const params = JSON.parse(media.params);
+            if (params.fileExt) {
+              const ext = '.' + params.fileExt.toLowerCase();
+              if (!fileName.toLowerCase().endsWith(ext)) {
+                fileName += ext;
+              }
+            }
+          } catch (e) { /* ignore */ }
         }
+        
         const localPath = await (earlyDlPromise ?? downloadToTemp(url, fileName));
         try {
           const sent = await tg.sendDocument(

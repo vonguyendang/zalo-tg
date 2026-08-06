@@ -257,8 +257,21 @@ async function sendHistoryMsg(
   // ── 4. File ───────────────────────────────────────────────────────────────
   if (msgType === ZALO_MSG_TYPES.FILE) {
     const url = media.href;
-    const fileName = media.title ?? `hist_file_${Date.now()}`;
     if (!url) return void saveTgMapping({ message_id: 0 });
+    
+    let fileName = media.title?.trim() || `hist_file_${Date.now()}`;
+    
+    if (media.params) {
+      try {
+        const params = JSON.parse(media.params);
+        if (params.fileExt) {
+          const ext = '.' + params.fileExt.toLowerCase();
+          if (!fileName.toLowerCase().endsWith(ext)) {
+            fileName += ext;
+          }
+        }
+      } catch (e) { /* ignore */ }
+    }
     const localPath = await downloadToTemp(url, fileName);
     try {
       const sent = await tg.sendDocument(config.telegram.groupId, 'file://' + localPath, tgOpts);
