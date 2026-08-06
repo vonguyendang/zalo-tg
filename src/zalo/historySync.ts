@@ -24,15 +24,25 @@ import {
   truncate,
 } from '../utils/format.js';
 import type { ZaloStyle } from '../utils/format.js';
-import { tgQueue } from '../utils/tgQueue.js';
+import { tgTextQueue, tgMediaQueue } from '../utils/tgQueue.js';
 
 // Proxy tg qua tgQueue (giống zalo/handler.ts)
+const MEDIA_METHODS = new Set([
+  'sendPhoto', 'sendVideo', 'sendDocument', 'sendAudio', 
+  'sendVoice', 'sendAnimation', 'sendMediaGroup', 'sendSticker'
+]);
+
 const tg = new Proxy(tgBot.telegram, {
   get(target, prop: string) {
     const orig = (target as unknown as Record<string, unknown>)[prop];
     if (typeof orig !== 'function') return orig;
-    return (...args: unknown[]) =>
-      tgQueue(() => (orig as (...a: unknown[]) => Promise<unknown>).apply(target, args));
+    return (...args: unknown[]) => {
+      if (MEDIA_METHODS.has(prop)) {
+        return tgMediaQueue(() => (orig as (...a: unknown[]) => Promise<unknown>).apply(target, args));
+      } else {
+        return tgTextQueue(() => (orig as (...a: unknown[]) => Promise<unknown>).apply(target, args));
+      }
+    };
   },
 }) as typeof tgBot.telegram;
 

@@ -14,10 +14,15 @@ interface QueueItem {
 }
 
 const MAX_RETRIES  = 5;
-const CONCURRENCY  = 5;   // max simultaneous in-flight TG calls
-const _queue: QueueItem[] = [];
-let   _active    = 0;
-let   _pauseUntil = 0; // epoch ms — global back-off on 429
+const CONCURRENCY_TEXT  = 15;  // higher concurrency for text messages
+const CONCURRENCY_MEDIA = 5;   // lower concurrency for media (prevent heavy load)
+
+const _textQueue: QueueItem[] = [];
+const _mediaQueue: QueueItem[] = [];
+
+let _activeText = 0;
+let _activeMedia = 0;
+let _pauseUntil = 0; // epoch ms — global back-off on 429 shared by both queues
 
 function is429(err: unknown): number | null {
   if (
@@ -35,15 +40,23 @@ function is429(err: unknown): number | null {
   return null;
 }
 
-function scheduleNext(): void {
-  while (_active < CONCURRENCY && _queue.length > 0) {
-    const item = _queue.shift()!;
-    _active++;
-    void runOne(item);
+function scheduleNextText(): void {
+  while (_activeText < CONCURRENCY_TEXT && _textQueue.length > 0) {
+    const item = _textQueue.shift()!;
+    _activeText++;
+    void runOne(item, true);
   }
 }
 
-async function runOne(item: QueueItem): Promise<void> {
+function scheduleNextMedia(): void {
+  while (_activeMedia < CONCURRENCY_MEDIA && _mediaQueue.length > 0) {
+    const item = _mediaQueue.shift()!;
+    _activeMedia++;
+    void runOne(item, false);
+  }
+}
+
+async function runOne(item: QueueItem, isText: boolean): Promise<void> {
   try {
     // Honour the global pause window before firing
     const wait = _pauseUntil - Date.now();
@@ -55,23 +68,40 @@ async function runOne(item: QueueItem): Promise<void> {
     const retryAfter = is429(err);
     if (retryAfter !== null && item.retries < MAX_RETRIES) {
       const delay = (retryAfter + 1) * 1000;
-      console.warn(`[TGQueue] 429 — retry #${item.retries + 1} after ${retryAfter}s`);
+      console.warn(`[TGQueue] 429 — retry #${item.retries + 1} after ${retryAfter}s (${isText ? 'text' : 'media'} queue)`);
       _pauseUntil = Math.max(_pauseUntil, Date.now() + delay);
       // Re-queue at the front so it goes next once the pause expires
-      _queue.unshift({ ...item, retries: item.retries + 1 });
+      if (isText) {
+        _textQueue.unshift({ ...item, retries: item.retries + 1 });
+      } else {
+        _mediaQueue.unshift({ ...item, retries: item.retries + 1 });
+      }
     } else {
       item.reject(err);
     }
   } finally {
-    _active--;
-    scheduleNext();
+    if (isText) {
+      _activeText--;
+      scheduleNextText();
+    } else {
+      _activeMedia--;
+      scheduleNextMedia();
+    }
   }
 }
 
-/** Enqueue a Telegram API call. Returns a promise that resolves/rejects when done. */
-export function tgQueue<T>(fn: () => Promise<T>): Promise<T> {
+/** Enqueue a Telegram API call to the text queue (fast, high concurrency). */
+export function tgTextQueue<T>(fn: () => Promise<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    _queue.push({ fn: fn as () => Promise<unknown>, resolve: resolve as (v: unknown) => void, reject, retries: 0 });
-    scheduleNext();
+    _textQueue.push({ fn: fn as () => Promise<unknown>, resolve: resolve as (v: unknown) => void, reject, retries: 0 });
+    scheduleNextText();
+  });
+}
+
+/** Enqueue a Telegram API call to the media queue (slow, low concurrency). */
+export function tgMediaQueue<T>(fn: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    _mediaQueue.push({ fn: fn as () => Promise<unknown>, resolve: resolve as (v: unknown) => void, reject, retries: 0 });
+    scheduleNextMedia();
   });
 }
