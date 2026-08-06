@@ -122,7 +122,7 @@ test('applyZaloMarkupHtml ignores overlapping mention replacements', () => {
 test('group formatting escapes sender and content independently', () => {
   assert.equal(formatGroupMsg('<A>', 'x&y'), '<b>&lt;A&gt;:</b>\nx&amp;y');
   assert.equal(formatGroupMsgHtml('<A>', '<i>x</i>'), '<b>&lt;A&gt;:</b>\n<i>x</i>');
-  assert.equal(groupCaption('<A>'), '<b>&lt;A&gt;</b>');
+  assert.equal(groupCaption('<A>'), '<b>&lt;A&gt;:</b>');
 });
 
 test('topicName uses the correct prefix and never breaks a grapheme at 128 chars', () => {

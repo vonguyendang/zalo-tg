@@ -170,24 +170,24 @@ export function applyZaloMarkupHtml(
 
 /**
  * Format a group message as:
- *   <b>SenderName:</b>
+ *   <b>SenderName:</b>[timeSuffix]
  *   content…
  */
-export function formatGroupMsg(senderName: string, content: string): string {
-  return `<b>${escapeHtml(truncate(senderName, 64))}:</b>\n${escapeHtml(truncate(content))}`;
+export function formatGroupMsg(senderName: string, content: string, timeSuffix = ''): string {
+  return `<b>${escapeHtml(truncate(senderName, 64))}:</b>${timeSuffix}\n${escapeHtml(truncate(content))}`;
 }
 
 /**
  * Format a group message with pre-escaped HTML body (e.g. when mention spans
  * have already been wrapped in <b> tags).
  */
-export function formatGroupMsgHtml(senderName: string, bodyHtml: string): string {
-  return `<b>${escapeHtml(truncate(senderName, 64))}:</b>\n${bodyHtml}`;
+export function formatGroupMsgHtml(senderName: string, bodyHtml: string, timeSuffix = ''): string {
+  return `<b>${escapeHtml(truncate(senderName, 64))}:</b>${timeSuffix}\n${bodyHtml}`;
 }
 
-/** Caption for group media (just bold sender name). */
-export function groupCaption(senderName: string): string {
-  return `<b>${escapeHtml(truncate(senderName, 64))}</b>`;
+/** Caption for group media (bold sender name + optional suffix). */
+export function groupCaption(senderName: string, timeSuffix = ''): string {
+  return `<b>${escapeHtml(truncate(senderName, 64))}:</b>${timeSuffix}`;
 }
 
 /**
