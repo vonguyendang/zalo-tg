@@ -88,7 +88,7 @@ async function performBackup(changedFilesList: string[]) {
   const backupPath = path.join(backupDir, filename);
   
   try {
-    const excludes = '-x "data/bot-api.bak/*" "data/bot-api.bak" "data/bot-api/*" "data/bot-api" "data/backups/*" "backups/*"';
+    const excludes = '-x "data/bot-api.bak/*" "data/bot-api.bak" "data/bot-api/*" "data/bot-api" "data/bot-api.log" "data/backups/*" "backups/*"';
     const command = `zip -q -r "${backupPath}" data sessions aliases.json .env ${excludes}`;
     await execAsync(command, { cwd: rootDir });
   } catch (err) {

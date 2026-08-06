@@ -1819,7 +1819,10 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       const projectRoot = path.resolve(config.dataDir, '..');
 
       if (fs.existsSync(config.dataDir)) {
-        zip.addLocalFolder(config.dataDir, 'data');
+        zip.addLocalFolder(config.dataDir, 'data', (filename: string) => {
+          const f = filename.toLowerCase();
+          return !f.includes('bot-api.log') && !f.includes('bot-api.bak') && !f.includes('bot-api/') && !f.includes('bot-api\\') && !f.includes('backups/') && !f.includes('backups\\');
+        });
       }
       if (fs.existsSync(config.zalo.credentialsDir)) {
         zip.addLocalFolder(config.zalo.credentialsDir, 'sessions');
