@@ -58,12 +58,12 @@ function scheduleNextMedia(): void {
 }
 
 async function runOne(item: QueueItem, isText: boolean): Promise<void> {
+  let timeoutId: NodeJS.Timeout | null = null;
   try {
     // Honour the global pause window before firing
     const wait = _pauseUntil - Date.now();
     if (wait > 0) await new Promise(r => setTimeout(r, wait));
 
-    let timeoutId: NodeJS.Timeout | null = null;
     const timeoutPromise = new Promise<never>((_, reject) => {
       // 10 minutes timeout to allow large file uploads (up to 2GB)
       timeoutId = setTimeout(() => reject(new Error('TG_API_TIMEOUT: Local bot API server hung')), 600000);
@@ -72,7 +72,6 @@ async function runOne(item: QueueItem, isText: boolean): Promise<void> {
     console.log(`[tgQueue] Starting execution. isText=${isText}`);
     const result = await Promise.race([item.fn(), timeoutPromise]);
     console.log(`[tgQueue] Execution finished successfully. isText=${isText}`);
-    clearTimeout(timeoutId!);
     item.resolve(result);
   } catch (err) {
     console.log(`[tgQueue] Execution threw an error. isText=${isText}`, err);
@@ -123,6 +122,7 @@ async function runOne(item: QueueItem, isText: boolean): Promise<void> {
       item.reject(err);
     }
   } finally {
+    if (timeoutId) clearTimeout(timeoutId);
     console.log(`[tgQueue] Finally block executing. isText=${isText}`);
     if (isText) {
       _activeText--;
