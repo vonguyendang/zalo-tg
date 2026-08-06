@@ -1,9 +1,12 @@
 import chokidar from 'chokidar';
-import AdmZip from 'adm-zip';
+import { exec } from 'child_process';
+import util from 'util';
 import path from 'path';
 import fs from 'fs';
 import { tgBot } from './telegram/bot.js';
 import { config } from './config.js';
+
+const execAsync = util.promisify(exec);
 
 let backupTimeout: NodeJS.Timeout | null = null;
 const BACKUP_DELAY_MS = 60 * 1000; // 60 seconds debounce to avoid spam
@@ -75,32 +78,23 @@ export function startBackupWatcher() {
 
 async function performBackup(changedFilesList: string[]) {
   console.log(`[Backup] Changes detected (${changedFilesList.length} files), creating backup archive...`);
-  const zip = new AdmZip();
   const rootDir = process.cwd();
 
-  const addTarget = (targetPath: string, zipPath: string) => {
-    if (!fs.existsSync(targetPath)) return;
-    const stat = fs.statSync(targetPath);
-    if (stat.isDirectory()) {
-      zip.addLocalFolder(targetPath, zipPath);
-    } else {
-      zip.addLocalFile(targetPath, path.dirname(zipPath) === '.' ? '' : path.dirname(zipPath));
-    }
-  };
-
-  addTarget(path.resolve(rootDir, 'data'), 'data');
-  addTarget(path.resolve(rootDir, 'sessions'), 'sessions');
-  addTarget(path.resolve(rootDir, 'aliases.json'), 'aliases.json');
-  addTarget(path.resolve(rootDir, '.env'), '.env');
-
-  const backupDir = path.resolve(rootDir, 'data', 'backups');
+  const backupDir = path.resolve(rootDir, 'backups');
   if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
   
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const filename = `backup-${timestamp}.zip`;
   const backupPath = path.join(backupDir, filename);
   
-  zip.writeZip(backupPath);
+  try {
+    const excludes = '-x "data/bot-api.bak/*" "data/bot-api.bak" "data/bot-api/*" "data/bot-api" "data/backups/*" "backups/*"';
+    const command = `zip -q -r "${backupPath}" data sessions aliases.json .env ${excludes}`;
+    await execAsync(command, { cwd: rootDir });
+  } catch (err) {
+    console.error('[Backup] Failed to create zip archive:', err);
+    return;
+  }
 
   let caption = '📦 <b>Auto Backup</b>\n\nCác file cấu hình và dữ liệu (data, sessions, aliases.json, .env) đã có sự thay đổi.';
   if (changedFilesList.length > 0) {

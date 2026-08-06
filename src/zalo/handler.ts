@@ -1131,7 +1131,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         try {
           const sent = await tg.sendDocument(
             config.telegram.groupId,
-            'file://' + localPath,
+            { source: localPath, filename: fileName },
             tgOpts,
           );
           saveTgMapping(sent);
@@ -1146,8 +1146,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         const localPath = await (earlyDlPromise ?? downloadToTemp(url, `video_${Date.now()}.mp4`));
         const fileName = media.title?.trim() || `video_${Date.now()}.mp4`;
         try {
-          // Gửi dưới dạng Document thay vì Video để Telegram không nén chất lượng/kích thước gốc
-          const sent = await tg.sendDocument(config.telegram.groupId, 'file://' + localPath, tgOpts);
+          const sent = await tg.sendVideo(config.telegram.groupId, { source: localPath, filename: fileName }, tgOpts);
           saveTgMapping(sent);
         } finally { await cleanTemp(localPath); }
         return;

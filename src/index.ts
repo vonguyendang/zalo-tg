@@ -91,38 +91,38 @@ async function startZalo(
       api.listener.requestOldReactions(ThreadType.Group);
       console.log(`[Boot] Requested catch-up sync for ${accountName} (isReconnect=${isReconnect})`);
 
-      void (async () => {
-        const groups = store.all().filter(e => e.type === 1 && e.accountId === accountId);
-        if (groups.length === 0) return;
-        
-        tgBot.telegram.sendMessage(
-          config.telegram.groupId, 
-          `🔄 <b>Zalo (${accountName}) đang tự động đồng bộ lịch sử tin nhắn lỡ...</b>\nQuá trình này đang chạy ngầm và có thể mất vài phút.`,
-          { parse_mode: 'HTML' }
-        ).catch(() => undefined);
-
-        let totalSynced = 0;
-        for (const g of groups) {
-          try {
-            const n = await syncGroupHistory(api, g.zaloId, g.topicId, accountId, { 
-              count: 30, 
-              delayMs: config.zalo.historySyncDelayMs || 2000 
-            });
-            totalSynced += n;
-            await new Promise(r => setTimeout(r, 3000));
-          } catch (err) {
-            console.warn(`[Boot] Lỗi đồng bộ tin lỡ cho nhóm ${g.zaloId}:`, err);
-          }
-        }
-        if (totalSynced > 0) {
-          const actionText = isReconnect ? 'kết nối lại' : 'khởi động';
-          tgBot.telegram.sendMessage(
-            config.telegram.groupId, 
-            `🔄 <b>Zalo (${accountName}) đã ${actionText}.</b>\nĐã tự động đồng bộ ${totalSynced} tin nhắn lỡ.`,
-            { parse_mode: 'HTML' }
-          ).catch(() => undefined);
-        }
-      })();
+      // void (async () => {
+      //   const groups = store.all().filter(e => e.type === 1 && e.accountId === accountId);
+      //   if (groups.length === 0) return;
+      //   
+      //   tgBot.telegram.sendMessage(
+      //     config.telegram.groupId, 
+      //     `🔄 <b>Zalo (${accountName}) đang tự động đồng bộ lịch sử tin nhắn lỡ...</b>\nQuá trình này đang chạy ngầm và có thể mất vài phút.`,
+      //     { parse_mode: 'HTML' }
+      //   ).catch(() => undefined);
+      // 
+      //   let totalSynced = 0;
+      //   for (const g of groups) {
+      //     try {
+      //       const n = await syncGroupHistory(api, g.zaloId, g.topicId, accountId, { 
+      //         count: 30, 
+      //         delayMs: config.zalo.historySyncDelayMs || 2000 
+      //       });
+      //       totalSynced += n;
+      //       await new Promise(r => setTimeout(r, 3000));
+      //     } catch (err) {
+      //       console.warn(`[Boot] Lỗi đồng bộ tin lỡ cho nhóm ${g.zaloId}:`, err);
+      //     }
+      //   }
+      //   if (totalSynced > 0) {
+      //     const actionText = isReconnect ? 'kết nối lại' : 'khởi động';
+      //     tgBot.telegram.sendMessage(
+      //       config.telegram.groupId, 
+      //       `🔄 <b>Zalo (${accountName}) đã ${actionText}.</b>\nĐã tự động đồng bộ ${totalSynced} tin nhắn lỡ.`,
+      //       { parse_mode: 'HTML' }
+      //     ).catch(() => undefined);
+      //   }
+      // })();
     } catch (err) {
       console.warn('[Boot] Failed to request catch-up sync:', err);
     }
@@ -273,23 +273,39 @@ async function main(): Promise<void> {
   _setZaloApi = setZaloApi;
 
   syncTelegramCommands().catch(() => undefined);
+  
+  const [botId] = config.telegram.token.split(':');
+  tgBot.botInfo = {
+    id: parseInt(botId, 10),
+    is_bot: true,
+    first_name: 'Zalo TG Bridge',
+    username: 'zalo_tg_bridge_bot',
+    can_join_groups: true,
+    can_read_all_group_messages: true,
+    supports_inline_queries: false
+  };
 
-  tgBot.launch({ allowedUpdates: ['message', 'callback_query', 'message_reaction', 'poll_answer', 'poll'] }, () => {
-    console.log('[Boot] Telegram bot started ✓');
-
-    setTelegramErrorReporter((msg) => {
-      void (async () => {
-        try {
-          const tid = await getErrorTopicId();
-          await tgBot.telegram.sendMessage(config.telegram.groupId, `🚨 <b>Error Log:</b>\n<pre>${msg}</pre>`, {
-            message_thread_id: tid,
-            parse_mode: 'HTML',
-          });
-        } catch {}
-      })();
+  tgBot.launch({ allowedUpdates: ['message', 'callback_query', 'message_reaction', 'poll_answer', 'poll'] })
+    .then(() => {
+      console.log('[Boot] Telegram bot started ✓');
+    })
+    .catch((err) => {
+      console.warn('[Boot] Telegram bot launch failed (ignored):', err);
     });
 
+  setTelegramErrorReporter((msg) => {
     void (async () => {
+      try {
+        const tid = await getErrorTopicId();
+        await tgBot.telegram.sendMessage(config.telegram.groupId, `🚨 <b>Error Log:</b>\n<pre>${msg}</pre>`, {
+          message_thread_id: tid,
+          parse_mode: 'HTML',
+        });
+      } catch {}
+    })();
+  });
+
+  void (async () => {
       try {
         const { apis, expired } = await initAllZaloApis();
         
@@ -360,6 +376,5 @@ async function main(): Promise<void> {
         console.error('[Boot] initAllZaloApis failed:', err);
       }
     })();
-  });
 }
 main().catch(console.error);
