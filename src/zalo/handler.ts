@@ -493,23 +493,38 @@ async function _doCreateTopic(api: ZaloAPI, accountId: string, accountName: stri
   const name = `[${alias}] ` + topicName(displayName, type);
   const color = type === ThreadType.Group ? 0xFF93B2 : 0x6FB9F0;
 
-  let topic: { message_thread_id: number };
+  let topic: { message_thread_id: number } | null = null;
   try {
-    topic = await tg.createForumTopic(
-      config.telegram.groupId,
-      name,
-      { icon_color: color },
-    );
+    let retries = 0;
+    while (retries < 5) {
+      try {
+        topic = await tg.createForumTopic(
+          config.telegram.groupId,
+          name,
+          { icon_color: color },
+        );
+        break;
+      } catch (err: unknown) {
+        const e = err as { response?: { error_code?: number; parameters?: { retry_after?: number } } };
+        if (e.response?.error_code === 429) {
+          const retryAfter = (e.response.parameters?.retry_after ?? 5) + 1;
+          console.warn(`[Zalo→TG] Rate limited creating topic "${name}". Retrying in ${retryAfter}s...`);
+          await new Promise(r => setTimeout(r, retryAfter * 1000));
+          retries++;
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (!topic) {
+      throw new Error('Too Many Requests: failed to create topic after 5 retries');
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('not enough rights') || msg.includes('TOPIC_') || msg.includes('rights to manage')) {
-      console.error(`[Zalo→TG] Cannot create topic — bot lacks "Manage Topics" admin right. Falling back to General topic.`);
-      // Use topic ID 1 (General) as fallback so messages still get delivered
-      const fallbackId = 1;
-      store.set({ topicId: fallbackId, accountId, zaloId, type, name: displayName });
-      return fallbackId;
-    }
-    throw err;
+    console.error(`[Zalo→TG] Cannot create topic for "${name}" (zaloId=${zaloId}): ${msg}. Falling back to General topic.`);
+    const fallbackId = 1;
+    store.set({ topicId: fallbackId, accountId, zaloId, type, name: displayName });
+    return fallbackId;
   }
 
   const topicId = topic.message_thread_id;
@@ -525,7 +540,7 @@ async function _doCreateTopic(api: ZaloAPI, accountId: string, accountName: stri
         config.telegram.groupId,
         { source: stream },
         {
-          message_thread_id: topicId,
+          ...(topicId > 1 ? { message_thread_id: topicId } : {}),
           caption: `🖼 Ảnh đại diện nhóm <b>${escapeHtml(displayName)}</b>`,
           parse_mode: 'HTML',
         },
@@ -831,9 +846,9 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
 
       // Base TG send options (with optional reply_parameters)
       const tgBase: {
-        message_thread_id: number;
+        message_thread_id?: number;
         reply_parameters?: { message_id: number; allow_sending_without_reply: boolean };
-      } = { message_thread_id: topicId };
+      } = topicId > 1 ? { message_thread_id: topicId } : {};
       if (tgReplyMsgId !== undefined) {
         tgBase.reply_parameters = { message_id: tgReplyMsgId, allow_sending_without_reply: true };
       }
@@ -1396,7 +1411,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
           const tgScoreMsg = await tg.sendMessage(
             config.telegram.groupId,
             scoreText,
-            { message_thread_id: topicId, parse_mode: 'HTML' },
+            { ...(topicId > 1 ? { message_thread_id: topicId } : {}), parse_mode: 'HTML' },
           );
 
           pollStore.save({
@@ -1609,7 +1624,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
               config.telegram.groupId,
               `<i>🗑 Admin <b>${escapeHtml(delActorName)}</b> đã xoá một tin nhắn (chưa được bridge) trên Zalo</i>`,
               {
-                message_thread_id: topicId,
+                ...(topicId > 1 ? { message_thread_id: topicId } : {}),
                 parse_mode: 'HTML',
               },
             );
@@ -1620,7 +1635,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
             config.telegram.groupId,
             `<i>🗑 Tin nhắn này đã bị <b>${escapeHtml(delActorName)}</b> (admin) xoá trên Zalo</i>`,
             {
-              message_thread_id: topicId,
+              ...(topicId > 1 ? { message_thread_id: topicId } : {}),
               parse_mode: 'HTML',
               reply_parameters: { message_id: tgMsgId, allow_sending_without_reply: true },
             },
@@ -1714,7 +1729,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         config.telegram.groupId,
         `<i>🗑 Tin nhắn này đã bị thu hồi trên Zalo</i>`,
         {
-          message_thread_id: topicId,
+          ...(topicId > 1 ? { message_thread_id: topicId } : {}),
           parse_mode: 'HTML',
           reply_parameters: { message_id: tgMsgId, allow_sending_without_reply: true },
         },
@@ -1838,7 +1853,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
               config.telegram.groupId,
               text,
               {
-                message_thread_id: topicId,
+                ...(topicId > 1 ? { message_thread_id: topicId } : {}),
                 parse_mode: 'HTML',
                 reply_parameters: { message_id: tgMsgId, allow_sending_without_reply: true },
               },
@@ -1925,7 +1940,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
             config.telegram.groupId,
             text,
             {
-              message_thread_id: topicId,
+              ...(topicId > 1 ? { message_thread_id: topicId } : {}),
               parse_mode: 'HTML',
               reply_markup: {
                 inline_keyboard: [[
@@ -2054,7 +2069,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
       await tg.sendMessage(
         config.telegram.groupId,
         `<i>${notifText}</i>`,
-        { message_thread_id: topicId, parse_mode: 'HTML' },
+        { ...(topicId > 1 ? { message_thread_id: topicId } : {}), parse_mode: 'HTML' },
       );
       console.log(`[ZaloHandler] GroupEvent type=${type} group=${groupId}`);
     } catch (err) {

@@ -1224,7 +1224,7 @@ interface ZaloAlbumBuffer {
   items:      ZaloAlbumItem[];
   senderName: string;
   topicId:    number;
-  tgBase:     { message_thread_id: number; reply_parameters?: { message_id: number; allow_sending_without_reply: boolean }; disable_notification?: boolean };
+  tgBase:     { message_thread_id?: number; reply_parameters?: { message_id: number; allow_sending_without_reply: boolean }; disable_notification?: boolean };
   caption?:   string;
   delaySuffix?: string;
 }
