@@ -1226,6 +1226,7 @@ interface ZaloAlbumBuffer {
   topicId:    number;
   tgBase:     { message_thread_id: number; reply_parameters?: { message_id: number; allow_sending_without_reply: boolean }; disable_notification?: boolean };
   caption?:   string;
+  delaySuffix?: string;
 }
 
 const _zaloAlbumBuffers = new Map<string, ZaloAlbumBuffer>(); // key = `${threadId}:${uidFrom}`
@@ -1253,6 +1254,7 @@ export const zaloAlbumStore = {
         topicId: buf.topicId,
         tgBase: buf.tgBase,
         caption: buf.caption,
+        delaySuffix: buf.delaySuffix,
       })).catch(err => console.error(`[zaloAlbumStore] Flush failed (key=${key}):`, err));
     };
 

@@ -828,7 +828,15 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         tgBase.reply_parameters = { message_id: tgReplyMsgId, allow_sending_without_reply: true };
       }
 
-      const caption = groupCaption(bridgeSenderName);
+      const msgTs = Number(msg.data.ts || 0);
+      let delaySuffix = '';
+      if (msgTs > 0 && Date.now() - msgTs > 60_000) {
+        const d = new Date(msgTs);
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        delaySuffix = `\n\n<i>(⏳ Gửi lúc: ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ${pad(d.getDate())}/${pad(d.getMonth() + 1)})</i>`;
+      }
+
+      const caption = groupCaption(bridgeSenderName) + delaySuffix;
       const tgOpts = { ...tgBase, parse_mode: 'HTML' as const, caption };
 
       // Build quote data + mapping helper — saved after every successful TG send
@@ -920,7 +928,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         const bodyHtml = (safeMentions?.length || safeStyles?.length)
           ? applyZaloMarkupHtml(safeBody, safeMentions, safeStyles)
           : escapeHtml(safeBody);
-        const tgText = formatGroupMsgHtml(bridgeSenderName, bodyHtml);
+        const tgText = formatGroupMsgHtml(bridgeSenderName, bodyHtml) + delaySuffix;
         const sent = await tg.sendMessage(
           config.telegram.groupId,
           tgText,
@@ -956,7 +964,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
           url,
           zaloMsgIds,
           photoCaption,
-          { senderName: bridgeSenderName, topicId, tgBase, zaloQuote: zaloQuoteData },
+          { senderName: bridgeSenderName, topicId, tgBase, zaloQuote: zaloQuoteData, delaySuffix },
           async (buf: any) => {
             if (buf.items.length === 1) {
               // Single photo — reuse eagerly started download (likely already done)
@@ -970,9 +978,9 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
                   {
                     ...buf.tgBase,
                     parse_mode: 'HTML' as const,
-                    caption: buf.caption
+                    caption: (buf.caption
                       ? `${groupCaption(buf.senderName)}\n${escapeHtml(buf.caption)}`
-                      : groupCaption(buf.senderName),
+                      : groupCaption(buf.senderName)) + (buf.delaySuffix || ''),
                   },
                 );
                 // Use buf.zaloQuote which already has the correct cliMsgId and
@@ -991,9 +999,9 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
                 });
                 if (dlPaths.length === 0) return;
                 localPaths.push(...dlPaths);
-                const captionText = buf.caption
+                const captionText = (buf.caption
                   ? `${groupCaption(buf.senderName)}\n${escapeHtml(buf.caption)}`
-                  : groupCaption(buf.senderName);
+                  : groupCaption(buf.senderName)) + (buf.delaySuffix || '');
                 // Telegram limits media groups to 10 items — split into batches
                 const BATCH = 10;
                 for (let i = 0; i < localPaths.length; i += BATCH) {
