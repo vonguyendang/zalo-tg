@@ -4,6 +4,8 @@ import path from 'path';
 import { createReadStream } from 'fs';
 import { readFile, stat } from 'fs/promises';
 import { execFile } from 'child_process';
+import axios from 'axios';
+import FormData from 'form-data';
 
 const MAX_ZALO_TEXT_LENGTH = 2000;
 
@@ -289,7 +291,7 @@ async function handleLoginCommand(
     const newApi = await triggerQRLogin({
       onQRReady: async (imagePath) => {
         try {
-          const form = new (require('form-data'))();
+          const form = new FormData();
           form.append('chat_id', chatId);
           form.append('photo', createReadStream(imagePath));
           if (threadId) form.append('message_thread_id', threadId);
@@ -299,7 +301,8 @@ async function handleLoginCommand(
             inline_keyboard: [[{ text: '❌ Hủy đăng nhập', callback_data: `login_cancel:qr:active` }]]
           }));
           
-          await require('axios').post(`https://api.telegram.org/bot${config.telegram.token}/sendPhoto`, form, {
+          const apiRoot = config.telegram.localServer || 'https://api.telegram.org';
+          await axios.post(`${apiRoot}/bot${config.telegram.token}/sendPhoto`, form, {
             headers: form.getHeaders(),
           });
         } catch (uploadErr) {
@@ -447,7 +450,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       const newApi = await triggerAppLogin({
         onQRReady: async (imagePath) => {
           try {
-            const form = new (require('form-data'))();
+            const form = new FormData();
             form.append('chat_id', chatId);
             form.append('photo', createReadStream(imagePath));
             if (threadId) form.append('message_thread_id', threadId);
@@ -456,8 +459,8 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
             form.append('reply_markup', JSON.stringify({
               inline_keyboard: [[{ text: '❌ Hủy đăng nhập', callback_data: `login_cancel:app:active` }]]
             }));
-            
-            await require('axios').post(`https://api.telegram.org/bot${config.telegram.token}/sendPhoto`, form, {
+            const apiRoot = config.telegram.localServer || 'https://api.telegram.org';
+            await axios.post(`${apiRoot}/bot${config.telegram.token}/sendPhoto`, form, {
               headers: form.getHeaders(),
             });
           } catch (uploadErr) {
