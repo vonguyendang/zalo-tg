@@ -56,7 +56,7 @@ test('groups Zalo photos even when every childnumber is zero and preserves order
   for (const [url, id] of [['url-1', 'm1'], ['url-2', 'm2'], ['url-3', 'm3']] as const) {
     zaloAlbumStore.add('g:u', url, [id], undefined, meta, buf => { flushed.push(buf); }, 0);
   }
-  await sleep(750);
+  await sleep(3100);
   assert.equal(flushed.length, 1);
   assert.deepEqual(flushed[0]!.items.map(item => item.url), ['url-1', 'url-2', 'url-3']);
 });
@@ -72,7 +72,7 @@ test('deduplicates a repeated Zalo photo URL but retains all message ids', async
   };
   zaloAlbumStore.add('g:u:dup', 'same-url', ['m1'], undefined, meta, buf => { result = buf; }, 0);
   zaloAlbumStore.add('g:u:dup', 'same-url', ['m2'], undefined, meta, buf => { result = buf; }, 0);
-  await sleep(750);
+  await sleep(3100);
   assert.equal(result?.items.length, 1);
   assert.deepEqual(result?.items[0]?.msgIds, ['m1', 'm2']);
 });
@@ -88,7 +88,7 @@ test('keeps fallback CDN URLs when duplicate Zalo photo events are merged', asyn
   };
   zaloAlbumStore.add('g:u:fallback', 'hd-url', ['m1'], undefined, meta, buf => { result = buf; }, 0, ['normal-url']);
   zaloAlbumStore.add('g:u:fallback', 'hd-url', ['m2'], undefined, meta, buf => { result = buf; }, 0, ['thumb-url']);
-  await sleep(750);
+  await sleep(3100);
   assert.deepEqual(result?.items[0]?.fallbackUrls, ['normal-url', 'thumb-url']);
 });
 
@@ -103,7 +103,7 @@ test('deduplicates renewed HD URLs when two Zalo events share a normal CDN URL',
   };
   zaloAlbumStore.add('g:u:renewed', 'hd-old', ['m1'], undefined, meta, buf => { result = buf; }, 0, ['normal']);
   zaloAlbumStore.add('g:u:renewed', 'hd-new', ['m2'], undefined, meta, buf => { result = buf; }, 0, ['normal']);
-  await sleep(750);
+  await sleep(3100);
   assert.equal(result?.items.length, 1);
   assert.deepEqual(result?.items[0]?.msgIds, ['m1', 'm2']);
   assert.deepEqual(result?.items[0]?.fallbackUrls, ['normal', 'hd-new']);
