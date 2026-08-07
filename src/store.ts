@@ -1261,7 +1261,7 @@ export const zaloAlbumStore = {
     // `childnumber` is not reliable for DM albums (Zalo commonly emits 0 for
     // every image). Debounce by conversation+sender instead: photos arriving
     // close together become one album, while a pause starts a new batch.
-    const FLUSH_DELAY_MS = 600;
+    const FLUSH_DELAY_MS = 3000;
     const existing = _zaloAlbumBuffers.get(key);
     if (existing) {
       clearTimeout(existing.timer);
