@@ -81,11 +81,27 @@ if (config.telegram.proxy) {
   if (proxyAgent) agentToUse = proxyAgent as https.Agent;
 }
 
-/** Singleton Telegraf bot instance shared across the app. */
 export const tgBot = new Telegraf(config.telegram.token, {
   telegram: config.telegram.localServer
     ? { apiRoot: config.telegram.localServer, agent: localAgent }
     : { agent: agentToUse },
+});
+
+// ── Global Middleware ──
+// Fix Telegraf ignoring commands with @username if botInfo is missing or not matched
+tgBot.use(async (ctx, next) => {
+  if (ctx.message && 'text' in ctx.message && ctx.message.entities) {
+    for (const entity of ctx.message.entities) {
+      if (entity.type === 'bot_command') {
+        const cmd = ctx.message.text.substring(entity.offset, entity.offset + entity.length);
+        const atIndex = cmd.indexOf('@');
+        if (atIndex !== -1) {
+          entity.length = atIndex; // Strip @username from being parsed by Telegraf
+        }
+      }
+    }
+  }
+  return next();
 });
 
 export const tgLocal = tgBot.telegram;

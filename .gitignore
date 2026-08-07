@@ -17,6 +17,7 @@ data/topics.json
 data/*.json
 data/*.json.gz
 data/bot-api/
+data/bot-api.bak/
 tmp/
 
 # Logs
@@ -35,3 +36,9 @@ app-session.json
 .mcp.json
 quick-start-script/mac-menu-bar/ZaloBotMenu
 sessions/
+
+#Scratch
+scratch/
+backups/
+*.jpg
+*.png
