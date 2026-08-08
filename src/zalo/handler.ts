@@ -677,6 +677,9 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
 
   api.listener.on('message', (msg: ZaloMessage) => {
     console.log(`[ZaloHandler DEBUG] Received raw msg event: threadId=${msg.threadId} msgType=${msg.data?.msgType} isSelf=${msg.isSelf} acc=${accountId}`);
+    if (msg.data.msgType === ZALO_MSG_TYPES.VIDEO || msg.data.msgType === ZALO_MSG_TYPES.LINK) {
+      console.log(`[ZaloHandler DEBUG] Raw message content:`, msg.data.content);
+    }
     if (msg.data?.msgType === 'chat.photo' || msg.data?.msgType === 'chat.video') {
       console.log(`[ZaloHandler DEBUG] Media payload:`, JSON.stringify(msg.data, null, 2));
     }
