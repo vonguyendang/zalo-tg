@@ -271,6 +271,27 @@ export async function convertSpriteSheetToGif(
 }
 
 /**
+ * Convert an audio file to OGG OPUS using ffmpeg.
+ * Returns the path to the converted file (caller must clean it up).
+ */
+export async function convertToOgg(inputPath: string): Promise<string> {
+  mkdirSync(TMP_DIR, { recursive: true });
+  const outputPath = uniqueTempName('voice', '.ogg');
+  await new Promise<void>((resolve, reject) => {
+    const ff = spawn('ffmpeg', [
+      '-y', '-i', inputPath,
+      '-c:a', 'libopus', '-b:a', '32k', '-vbr', 'on',
+      '-vn', outputPath,
+    ]);
+    let stderr = '';
+    ff.stderr?.on('data', chunk => { stderr += String(chunk).slice(-2_000); });
+    ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg ogg conversion exit ${code}: ${stderr.trim().slice(-500)}`)));
+    ff.on('error', reject);
+  });
+  return outputPath;
+}
+
+/**
  * Convert an audio file to M4A (AAC) using ffmpeg.
  * Returns the path to the converted file (caller must clean it up).
  */

@@ -9,7 +9,7 @@ import { ZALO_MSG_TYPES } from './types.js';
 import { store, accountAliasStore } from '../store.js';
 import { tgBot } from '../telegram/bot.js';
 import { config } from '../config.js';
-import { downloadToTemp, cleanTemp } from '../utils/media.js';
+import { downloadToTemp, cleanTemp, convertToOgg } from '../utils/media.js';
 import { applyZaloMarkupHtml, formatGroupMsgHtml, formatGroupMsg, groupCaption, topicName, truncate, escapeHtml } from '../utils/format.js';
 import { extractHiddenData } from '../utils/steganography.js';
 import { maybeAutoReply } from './autoReply.js';
@@ -681,7 +681,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
     if (msg.data.msgType === ZALO_MSG_TYPES.VIDEO || msg.data.msgType === ZALO_MSG_TYPES.LINK) {
       console.log(`[ZaloHandler DEBUG] Raw message content:`, msg.data.content);
     }
-    if (msg.data?.msgType === 'chat.photo' || msg.data?.msgType === 'chat.video') {
+    if (msg.data?.msgType === 'chat.photo' || msg.data?.msgType === 'chat.video' || msg.data?.msgType === 'chat.voice') {
       console.log(`[ZaloHandler DEBUG] Media payload:`, JSON.stringify(msg.data, null, 2));
     }
     const queueKey = `${accountId}:${msg.threadId}`;
@@ -1242,10 +1242,15 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         const ext = path.extname(url.split('?')[0] ?? '').toLowerCase() || '.m4a';
         const localPath = await (earlyDlPromise ?? downloadToTemp(url, `voice_${Date.now()}${ext}`));
         const finalFileName = `zalo_voice_${Date.now()}${ext}`;
+        let oggPath: string | undefined;
         try {
-          const sent = await tg.sendVoice(config.telegram.groupId, { source: localPath, filename: finalFileName }, tgOpts);
+          oggPath = await convertToOgg(localPath);
+          const sent = await tg.sendVoice(config.telegram.groupId, { source: oggPath, filename: 'voice.ogg' }, tgOpts);
           saveTgMapping(sent);
-        } finally { await cleanTemp(localPath); }
+        } finally { 
+          await cleanTemp(localPath); 
+          if (oggPath) await cleanTemp(oggPath);
+        }
         return;
       }
 
