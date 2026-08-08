@@ -53,7 +53,7 @@ index 23306ee..4b1bce3 100644
  export type SendVideoResponse = {
      msgId: number;
 diff --git a/node_modules/zca-js/dist/apis/sendVideo.js b/node_modules/zca-js/dist/apis/sendVideo.js
-index 03c818c..d6b0622 100644
+index 03c818c..e134662 100644
 --- a/node_modules/zca-js/dist/apis/sendVideo.js
 +++ b/node_modules/zca-js/dist/apis/sendVideo.js
 @@ -31,9 +31,13 @@ export const sendVideoFactory = apiFactory()((api, ctx, utils) => {
@@ -73,7 +73,7 @@ index 03c818c..d6b0622 100644
              }
          }
          catch (error) {
-@@ -52,7 +56,10 @@ export const sendVideoFactory = apiFactory()((api, ctx, utils) => {
+@@ -52,11 +56,14 @@ export const sendVideoFactory = apiFactory()((api, ctx, utils) => {
                      duration: (_b = options.duration) !== null && _b !== void 0 ? _b : 0,
                      width: (_c = options.width) !== null && _c !== void 0 ? _c : 1280,
                      height: (_d = options.height) !== null && _d !== void 0 ? _d : 720,
@@ -84,7 +84,12 @@ index 03c818c..d6b0622 100644
                      properties: {
                          color: -1,
                          size: -1,
-@@ -81,7 +88,10 @@ export const sendVideoFactory = apiFactory()((api, ctx, utils) => {
+-                        type: 1003,
++                        type: 1,
+                         subType: 0,
+                         ext: {
+                             sSrcType: -1,
+@@ -81,11 +88,14 @@ export const sendVideoFactory = apiFactory()((api, ctx, utils) => {
                      duration: (_g = options.duration) !== null && _g !== void 0 ? _g : 0,
                      width: (_h = options.width) !== null && _h !== void 0 ? _h : 1280,
                      height: (_j = options.height) !== null && _j !== void 0 ? _j : 720,
@@ -95,6 +100,43 @@ index 03c818c..d6b0622 100644
                      properties: {
                          color: -1,
                          size: -1,
+-                        type: 1003,
++                        type: 1,
+                         subType: 0,
+                         ext: {
+                             sSrcType: -1,
+diff --git a/node_modules/zca-js/dist/apis/sendVoice.d.ts b/node_modules/zca-js/dist/apis/sendVoice.d.ts
+index c04c728..a4b8c60 100644
+--- a/node_modules/zca-js/dist/apis/sendVoice.d.ts
++++ b/node_modules/zca-js/dist/apis/sendVoice.d.ts
+@@ -1,6 +1,7 @@
+ import { ThreadType } from "../models/index.js";
+ export type SendVoiceOptions = {
+     voiceUrl: string;
++    duration?: number;
+     /**
+      * Time to live in milliseconds (default: 0)
+      */
+diff --git a/node_modules/zca-js/dist/apis/sendVoice.js b/node_modules/zca-js/dist/apis/sendVoice.js
+index f8bcc6b..8e9c81a 100644
+--- a/node_modules/zca-js/dist/apis/sendVoice.js
++++ b/node_modules/zca-js/dist/apis/sendVoice.js
+@@ -39,6 +39,7 @@ export const sendVoiceFactory = apiFactory()((api, ctx, utils) => {
+                     voiceUrl: options.voiceUrl,
+                     m4aUrl: options.voiceUrl,
+                     fileSize: fileSize !== null && fileSize !== void 0 ? fileSize : 0,
++                    duration: options.duration || 0,
+                 }),
+                 imei: ctx.imei,
+             }
+@@ -53,6 +54,7 @@ export const sendVoiceFactory = apiFactory()((api, ctx, utils) => {
+                     voiceUrl: options.voiceUrl,
+                     m4aUrl: options.voiceUrl,
+                     fileSize: fileSize !== null && fileSize !== void 0 ? fileSize : 0,
++                    duration: options.duration || 0,
+                 }),
+                 imei: ctx.imei,
+             };
 diff --git a/node_modules/zca-js/dist/cjs/apis/listen.cjs b/node_modules/zca-js/dist/cjs/apis/listen.cjs
 index 92ab353..0ba3576 100644
 --- a/node_modules/zca-js/dist/cjs/apis/listen.cjs
