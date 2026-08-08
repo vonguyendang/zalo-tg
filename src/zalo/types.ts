@@ -13,6 +13,8 @@ import type { API, ThreadType } from 'zca-js';
 export interface ZaloMediaContent {
   // common TAttachmentContent fields (used by ALL media types)
   href?:        string;
+  videoUrl?:    string;
+  hdUrl?:       string;
   thumb?:       string;
   title?:       string;
   description?: string;

@@ -769,7 +769,8 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
 
       // Determine media URL eagerly (before topic lookup) so download starts immediately
       const _eagerMediaUrl = (() => {
-        if (msgType === ZALO_MSG_TYPES.VIDEO || msgType === ZALO_MSG_TYPES.VOICE ||
+        if (msgType === ZALO_MSG_TYPES.VIDEO) return media.videoUrl || media.hdUrl || media.href;
+        if (msgType === ZALO_MSG_TYPES.VOICE ||
           msgType === ZALO_MSG_TYPES.GIF || msgType === ZALO_MSG_TYPES.FILE) return media.href;
         if (msgType === ZALO_MSG_TYPES.PHOTO) {
           let u = media.href;
@@ -1180,7 +1181,7 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
 
       // ── 5. Video ───────────────────────────────────────────────────────────
       if (msgType === ZALO_MSG_TYPES.VIDEO) {
-        const url = media.href;
+        const url = media.videoUrl || media.hdUrl || media.href;
         if (!url) { console.warn('[ZaloHandler] Video: no URL found in content:', media); return; }
         const localPath = await (earlyDlPromise ?? downloadToTemp(url, `video_${Date.now()}.mp4`));
         const fileName = media.title?.trim() || `video_${Date.now()}.mp4`;
