@@ -53,7 +53,7 @@ index 23306ee..4b1bce3 100644
  export type SendVideoResponse = {
      msgId: number;
 diff --git a/node_modules/zca-js/dist/apis/sendVideo.js b/node_modules/zca-js/dist/apis/sendVideo.js
-index 03c818c..52086e0 100644
+index 03c818c..d6b0622 100644
 --- a/node_modules/zca-js/dist/apis/sendVideo.js
 +++ b/node_modules/zca-js/dist/apis/sendVideo.js
 @@ -31,9 +31,13 @@ export const sendVideoFactory = apiFactory()((api, ctx, utils) => {
@@ -73,18 +73,22 @@ index 03c818c..52086e0 100644
              }
          }
          catch (error) {
-@@ -53,6 +57,8 @@ export const sendVideoFactory = apiFactory()((api, ctx, utils) => {
+@@ -52,7 +56,10 @@ export const sendVideoFactory = apiFactory()((api, ctx, utils) => {
+                     duration: (_b = options.duration) !== null && _b !== void 0 ? _b : 0,
                      width: (_c = options.width) !== null && _c !== void 0 ? _c : 1280,
                      height: (_d = options.height) !== null && _d !== void 0 ? _d : 720,
++                    ratio: (options.width || 1280) / (options.height || 720),
                      fileSize: fileSize,
 +                    fileId: options.fileId,
 +                    checksum: options.checksum,
                      properties: {
                          color: -1,
                          size: -1,
-@@ -82,6 +88,8 @@ export const sendVideoFactory = apiFactory()((api, ctx, utils) => {
+@@ -81,7 +88,10 @@ export const sendVideoFactory = apiFactory()((api, ctx, utils) => {
+                     duration: (_g = options.duration) !== null && _g !== void 0 ? _g : 0,
                      width: (_h = options.width) !== null && _h !== void 0 ? _h : 1280,
                      height: (_j = options.height) !== null && _j !== void 0 ? _j : 720,
++                    ratio: (options.width || 1280) / (options.height || 720),
                      fileSize: fileSize,
 +                    fileId: options.fileId,
 +                    checksum: options.checksum,
@@ -137,21 +141,29 @@ index 92ab353..0ba3576 100644
                      const { groupMsgs } = parsedData;
                      for (const msg of groupMsgs) {
 diff --git a/node_modules/zca-js/dist/cjs/apis/sendVideo.cjs b/node_modules/zca-js/dist/cjs/apis/sendVideo.cjs
-index df95386..7bff174 100644
+index df95386..ce6d86b 100644
 --- a/node_modules/zca-js/dist/cjs/apis/sendVideo.cjs
 +++ b/node_modules/zca-js/dist/cjs/apis/sendVideo.cjs
-@@ -64,6 +64,8 @@ const sendVideoFactory = utils.apiFactory()((api, ctx, utils) => {
+@@ -63,7 +63,12 @@ const sendVideoFactory = utils.apiFactory()((api, ctx, utils) => {
+                     duration: (_b = options.duration) !== null && _b !== void 0 ? _b : 0,
                      width: (_c = options.width) !== null && _c !== void 0 ? _c : 1280,
                      height: (_d = options.height) !== null && _d !== void 0 ? _d : 720,
++                    ratio: (options.width || 1280) / (options.height || 720),
++                    thumbWidth: options.width,
++                    thumbHeight: options.height,
                      fileSize: fileSize,
 +                    fileId: options.fileId,
 +                    checksum: options.checksum,
                      properties: {
                          color: -1,
                          size: -1,
-@@ -93,6 +95,8 @@ const sendVideoFactory = utils.apiFactory()((api, ctx, utils) => {
+@@ -92,7 +97,12 @@ const sendVideoFactory = utils.apiFactory()((api, ctx, utils) => {
+                     duration: (_g = options.duration) !== null && _g !== void 0 ? _g : 0,
                      width: (_h = options.width) !== null && _h !== void 0 ? _h : 1280,
                      height: (_j = options.height) !== null && _j !== void 0 ? _j : 720,
++                    ratio: (options.width || 1280) / (options.height || 720),
++                    thumbWidth: options.width,
++                    thumbHeight: options.height,
                      fileSize: fileSize,
 +                    fileId: options.fileId,
 +                    checksum: options.checksum,
