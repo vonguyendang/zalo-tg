@@ -29,12 +29,12 @@ test('keeps global contact name separate from group-scoped display names', async
 
 test('keeps echo suppression active until every concurrent send finishes', async () => {
   const { sentMsgStore } = await import('../src/store.js');
-  sentMsgStore.markSending('concurrent-thread');
-  sentMsgStore.markSending('concurrent-thread');
-  sentMsgStore.unmarkSending('concurrent-thread');
-  assert.equal(sentMsgStore.isSendingTo('concurrent-thread'), true);
-  sentMsgStore.unmarkSending('concurrent-thread');
-  assert.equal(sentMsgStore.isSendingTo('concurrent-thread'), false);
+  sentMsgStore.markSending('default', 'concurrent-thread');
+  sentMsgStore.markSending('default', 'concurrent-thread');
+  sentMsgStore.unmarkSending('default', 'concurrent-thread');
+  assert.equal(sentMsgStore.isSendingTo('default', 'concurrent-thread'), true);
+  sentMsgStore.unmarkSending('default', 'concurrent-thread');
+  assert.equal(sentMsgStore.isSendingTo('default', 'concurrent-thread'), false);
 });
 
 test('keeps a trailing single photo out of sendMediaGroup', async () => {
