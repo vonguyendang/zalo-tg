@@ -1,8 +1,19 @@
 diff --git a/node_modules/zca-js/dist/apis/listen.js b/node_modules/zca-js/dist/apis/listen.js
-index ce5d95e..b734125 100644
+index ce5d95e..442e1b4 100644
 --- a/node_modules/zca-js/dist/apis/listen.js
 +++ b/node_modules/zca-js/dist/apis/listen.js
-@@ -172,7 +172,7 @@ export class Listener extends EventEmitter {
+@@ -154,6 +154,10 @@ export class Listener extends EventEmitter {
+                 if (decodedData.length == 0)
+                     return;
+                 const parsed = JSON.parse(decodedData);
++                console.log(`[ZCA-JS] WS Received cmd=${cmd} subCmd=${subCmd} version=${version}`);
++                if (version == 1 && ![1, 2, 501, 521, 601, 701, 1500, 2600].includes(cmd)) {
++                    console.log(`[ZCA-JS] Unhandled cmd=${cmd} subCmd=${subCmd}:`, parsed);
++                }
+                 if (version == 1 && cmd == 1 && subCmd == 1 && hasOwn(parsed, "key")) {
+                     this.cipherKey = parsed.key;
+                     this.emit("cipher_key", parsed.key);
+@@ -172,7 +176,7 @@ export class Listener extends EventEmitter {
                          ping();
                      }, this.ctx.settings.features.socket.ping_interval);
                  }
@@ -11,7 +22,7 @@ index ce5d95e..b734125 100644
                      const parsedData = (await decodeEventData(parsed, this.cipherKey)).data;
                      const { msgs } = parsedData;
                      for (const msg of msgs) {
-@@ -191,7 +191,7 @@ export class Listener extends EventEmitter {
+@@ -191,7 +195,7 @@ export class Listener extends EventEmitter {
                          }
                      }
                  }
@@ -21,7 +32,7 @@ index ce5d95e..b734125 100644
                      const { groupMsgs } = parsedData;
                      for (const msg of groupMsgs) {
 diff --git a/node_modules/zca-js/dist/apis/sendVideo.d.ts b/node_modules/zca-js/dist/apis/sendVideo.d.ts
-index 23306ee..eedea31 100644
+index 23306ee..4b1bce3 100644
 --- a/node_modules/zca-js/dist/apis/sendVideo.d.ts
 +++ b/node_modules/zca-js/dist/apis/sendVideo.d.ts
 @@ -16,6 +16,7 @@ export type SendVideoOptions = {
@@ -32,8 +43,17 @@ index 23306ee..eedea31 100644
      /**
       * Width of the video
       */
+@@ -28,6 +29,8 @@ export type SendVideoOptions = {
+      * Time to live in milliseconds (default: 0)
+      */
+     ttl?: number;
++    fileId?: string;
++    checksum?: string;
+ };
+ export type SendVideoResponse = {
+     msgId: number;
 diff --git a/node_modules/zca-js/dist/apis/sendVideo.js b/node_modules/zca-js/dist/apis/sendVideo.js
-index 03c818c..a94c75f 100644
+index 03c818c..52086e0 100644
 --- a/node_modules/zca-js/dist/apis/sendVideo.js
 +++ b/node_modules/zca-js/dist/apis/sendVideo.js
 @@ -31,9 +31,13 @@ export const sendVideoFactory = apiFactory()((api, ctx, utils) => {
@@ -53,6 +73,24 @@ index 03c818c..a94c75f 100644
              }
          }
          catch (error) {
+@@ -53,6 +57,8 @@ export const sendVideoFactory = apiFactory()((api, ctx, utils) => {
+                     width: (_c = options.width) !== null && _c !== void 0 ? _c : 1280,
+                     height: (_d = options.height) !== null && _d !== void 0 ? _d : 720,
+                     fileSize: fileSize,
++                    fileId: options.fileId,
++                    checksum: options.checksum,
+                     properties: {
+                         color: -1,
+                         size: -1,
+@@ -82,6 +88,8 @@ export const sendVideoFactory = apiFactory()((api, ctx, utils) => {
+                     width: (_h = options.width) !== null && _h !== void 0 ? _h : 1280,
+                     height: (_j = options.height) !== null && _j !== void 0 ? _j : 720,
+                     fileSize: fileSize,
++                    fileId: options.fileId,
++                    checksum: options.checksum,
+                     properties: {
+                         color: -1,
+                         size: -1,
 diff --git a/node_modules/zca-js/dist/cjs/apis/listen.cjs b/node_modules/zca-js/dist/cjs/apis/listen.cjs
 index 92ab353..0ba3576 100644
 --- a/node_modules/zca-js/dist/cjs/apis/listen.cjs
@@ -98,6 +136,28 @@ index 92ab353..0ba3576 100644
                      const parsedData = (await utils.decodeEventData(parsed, this.cipherKey)).data;
                      const { groupMsgs } = parsedData;
                      for (const msg of groupMsgs) {
+diff --git a/node_modules/zca-js/dist/cjs/apis/sendVideo.cjs b/node_modules/zca-js/dist/cjs/apis/sendVideo.cjs
+index df95386..7bff174 100644
+--- a/node_modules/zca-js/dist/cjs/apis/sendVideo.cjs
++++ b/node_modules/zca-js/dist/cjs/apis/sendVideo.cjs
+@@ -64,6 +64,8 @@ const sendVideoFactory = utils.apiFactory()((api, ctx, utils) => {
+                     width: (_c = options.width) !== null && _c !== void 0 ? _c : 1280,
+                     height: (_d = options.height) !== null && _d !== void 0 ? _d : 720,
+                     fileSize: fileSize,
++                    fileId: options.fileId,
++                    checksum: options.checksum,
+                     properties: {
+                         color: -1,
+                         size: -1,
+@@ -93,6 +95,8 @@ const sendVideoFactory = utils.apiFactory()((api, ctx, utils) => {
+                     width: (_h = options.width) !== null && _h !== void 0 ? _h : 1280,
+                     height: (_j = options.height) !== null && _j !== void 0 ? _j : 720,
+                     fileSize: fileSize,
++                    fileId: options.fileId,
++                    checksum: options.checksum,
+                     properties: {
+                         color: -1,
+                         size: -1,
 diff --git a/node_modules/zca-js/dist/cjs/context.cjs b/node_modules/zca-js/dist/cjs/context.cjs
 index aa2c571..8ce7a92 100644
 --- a/node_modules/zca-js/dist/cjs/context.cjs

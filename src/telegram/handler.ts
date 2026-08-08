@@ -3192,7 +3192,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const videoUploads: any[] = await api.uploadAttachment([localVideoPath], zaloId, threadType);
           const videoUpload = videoUploads?.find((r: { fileType?: string }) => r.fileType === 'video') as
-            { fileUrl?: string } | undefined;
+            { fileUrl?: string; fileId?: string; checksum?: string } | undefined;
 
           if (!videoUpload?.fileUrl) {
             // Fallback: send as file attachment
@@ -3218,6 +3218,8 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
             const result = await (api.sendVideo as (...a: any[]) => Promise<{ msgId?: number }>)(
               {
                 videoUrl:     videoUpload.fileUrl,
+                fileId:       videoUpload.fileId,
+                checksum:     videoUpload.checksum,
                 thumbnailUrl: thumbUrl,
                 width:        vid.width,
                 height:       vid.height,
