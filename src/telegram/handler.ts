@@ -6,6 +6,7 @@ import { readFile, stat } from 'fs/promises';
 import { execFile } from 'child_process';
 import axios from 'axios';
 import FormData from 'form-data';
+import { encodeHiddenData } from '../utils/steganography.js';
 
 const MAX_ZALO_TEXT_LENGTH = 2000;
 
@@ -3225,7 +3226,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
                 height:       vid.height,
                 duration:     (vid.duration ?? 0) * 1000,
                 fileSize:     vid.file_size ?? 0,
-                msg:          cap ?? '',
+                msg:          (cap ?? '') + encodeHiddenData(`zl_vid_url:${videoUpload.fileUrl}`),
               },
               zaloId,
               threadType,

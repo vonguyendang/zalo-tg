@@ -11,6 +11,7 @@ import { tgBot } from '../telegram/bot.js';
 import { config } from '../config.js';
 import { downloadToTemp, cleanTemp } from '../utils/media.js';
 import { applyZaloMarkupHtml, formatGroupMsgHtml, formatGroupMsg, groupCaption, topicName, truncate, escapeHtml } from '../utils/format.js';
+import { extractHiddenData } from '../utils/steganography.js';
 import { maybeAutoReply } from './autoReply.js';
 import type { ZaloStyle } from '../utils/format.js';
 import { msgStore, userCache, pollStore, sentMsgStore, zaloAlbumStore, reactionEchoStore, reactionSummaryStore, reactionEventDedupeStore, aliasCache, friendsCache, recentlyRecalledMsgIds, type ZaloQuoteData } from '../store.js';
@@ -1191,22 +1192,44 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         return;
       }
 
-      // ── 5. Video ───────────────────────────────────────────────────────────
       if (msgType === ZALO_MSG_TYPES.VIDEO) {
+        const titleDesc = (media.title || '') + ' ' + (media.description || '');
+        const { hiddenData, cleanText } = extractHiddenData(titleDesc);
+        
         let url = media.videoUrl || media.hdUrl || media.href;
+        
+        let vWidth: number | undefined;
+        let vHeight: number | undefined;
+        let vDuration: number | undefined;
+        
         if (media.params) {
           try {
             const p = JSON.parse(media.params) as any;
             if (p.videoUrl) url = p.videoUrl;
             else if (p.hdUrl) url = p.hdUrl;
             else if (p.hd) url = p.hd;
+            
+            if (p.video_width) vWidth = p.video_width;
+            if (p.video_height) vHeight = p.video_height;
+            if (p.duration) vDuration = p.duration;
           } catch { }
         }
+        
+        if (hiddenData?.startsWith('zl_vid_url:')) {
+          url = hiddenData.slice(11);
+          console.log(`[ZaloHandler] Found hidden video URL from bridged message, bypassing Zalo crop: ${url}`);
+        }
+        
         if (!url) { console.warn('[ZaloHandler] Video: no URL found in content:', media); return; }
         const localPath = await (earlyDlPromise ?? downloadToTemp(url, `video_${Date.now()}.mp4`));
-        const fileName = media.title?.trim() || `video_${Date.now()}.mp4`;
+        const finalFileName = `zalo_video_${Date.now()}.mp4`;
         try {
-          const sent = await tg.sendVideo(config.telegram.groupId, 'file://' + localPath, tgOpts);
+          const sent = await tg.sendVideo(config.telegram.groupId, { source: localPath, filename: finalFileName }, {
+            ...tgOpts,
+            width: vWidth,
+            height: vHeight,
+            duration: vDuration ? Math.floor(vDuration / 1000) : undefined,
+          });
           saveTgMapping(sent);
         } finally { await cleanTemp(localPath); }
         return;
@@ -1218,8 +1241,9 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         if (!url) { console.warn('[ZaloHandler] Voice: no URL found in content:', media); return; }
         const ext = path.extname(url.split('?')[0] ?? '').toLowerCase() || '.m4a';
         const localPath = await (earlyDlPromise ?? downloadToTemp(url, `voice_${Date.now()}${ext}`));
+        const finalFileName = `zalo_voice_${Date.now()}${ext}`;
         try {
-          const sent = await tg.sendVoice(config.telegram.groupId, 'file://' + localPath, tgOpts);
+          const sent = await tg.sendVoice(config.telegram.groupId, { source: localPath, filename: finalFileName }, tgOpts);
           saveTgMapping(sent);
         } finally { await cleanTemp(localPath); }
         return;
