@@ -3279,15 +3279,21 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
         try {
           m4aPath = await convertToM4a(oggPath);
           // Upload to Zalo CDN to get a voiceUrl
-          const uploaded = await api.uploadAttachment(m4aPath, zaloId, threadType) as Array<{ fileUrl?: string }>;
-          const voiceUrl = uploaded[0]?.fileUrl;
+          const uploaded = await api.uploadAttachment(m4aPath, zaloId, threadType) as Array<{ fileUrl?: string, fileId?: string, checksum?: string }>;
+          const voiceUpload = uploaded[0];
+          const voiceUrl = voiceUpload?.fileUrl;
           if (!voiceUrl) throw new Error('No fileUrl from uploadAttachment');
           console.log(`[TG→Zalo] Sending voice → ${voiceUrl}`);
           // Zalo mobile relies heavily on duration metadata for native voice UX.
           // Keep the value in milliseconds to match zca-js video/voice internals.
           const voiceDurationMs = Math.max(0, (msg.voice.duration ?? 0) * 1000);
           const voiceResult = await api.sendVoice(
-            (voiceDurationMs > 0 ? { voiceUrl, duration: voiceDurationMs } : { voiceUrl }) as any,
+            { 
+              voiceUrl, 
+              duration: voiceDurationMs,
+              fileId: voiceUpload.fileId,
+              checksum: voiceUpload.checksum
+            } as any,
             zaloId,
             threadType,
           ) as Record<string, unknown>;

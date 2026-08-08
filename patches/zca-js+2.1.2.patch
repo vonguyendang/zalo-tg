@@ -106,34 +106,40 @@ index 03c818c..e134662 100644
                          ext: {
                              sSrcType: -1,
 diff --git a/node_modules/zca-js/dist/apis/sendVoice.d.ts b/node_modules/zca-js/dist/apis/sendVoice.d.ts
-index c04c728..a4b8c60 100644
+index c04c728..daa8dc4 100644
 --- a/node_modules/zca-js/dist/apis/sendVoice.d.ts
 +++ b/node_modules/zca-js/dist/apis/sendVoice.d.ts
-@@ -1,6 +1,7 @@
+@@ -1,6 +1,9 @@
  import { ThreadType } from "../models/index.js";
  export type SendVoiceOptions = {
      voiceUrl: string;
 +    duration?: number;
++    fileId?: string;
++    checksum?: string;
      /**
       * Time to live in milliseconds (default: 0)
       */
 diff --git a/node_modules/zca-js/dist/apis/sendVoice.js b/node_modules/zca-js/dist/apis/sendVoice.js
-index f8bcc6b..8e9c81a 100644
+index f8bcc6b..3293161 100644
 --- a/node_modules/zca-js/dist/apis/sendVoice.js
 +++ b/node_modules/zca-js/dist/apis/sendVoice.js
-@@ -39,6 +39,7 @@ export const sendVoiceFactory = apiFactory()((api, ctx, utils) => {
+@@ -39,6 +39,9 @@ export const sendVoiceFactory = apiFactory()((api, ctx, utils) => {
                      voiceUrl: options.voiceUrl,
                      m4aUrl: options.voiceUrl,
                      fileSize: fileSize !== null && fileSize !== void 0 ? fileSize : 0,
 +                    duration: options.duration || 0,
++                    fileId: options.fileId || "",
++                    checksum: options.checksum || "",
                  }),
                  imei: ctx.imei,
              }
-@@ -53,6 +54,7 @@ export const sendVoiceFactory = apiFactory()((api, ctx, utils) => {
+@@ -53,6 +56,9 @@ export const sendVoiceFactory = apiFactory()((api, ctx, utils) => {
                      voiceUrl: options.voiceUrl,
                      m4aUrl: options.voiceUrl,
                      fileSize: fileSize !== null && fileSize !== void 0 ? fileSize : 0,
 +                    duration: options.duration || 0,
++                    fileId: options.fileId || "",
++                    checksum: options.checksum || "",
                  }),
                  imei: ctx.imei,
              };
