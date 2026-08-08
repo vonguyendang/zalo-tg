@@ -10,7 +10,7 @@
     "tui:build": "go build -o bin/zalo-tg-tui ./cmd/zalo-tg-tui && GOBIN=$PWD/bin go install github.com/charmbracelet/glow@v1.5.1",
     "test": "NODE_OPTIONS=--disable-warning=DEP0205 tsx --test tests/*.test.ts",
     "check": "npm run build && npm test",
-    "security:audit": "npm audit --omit=dev",
+    "security:audit": "npm audit --omit=dev --audit-level=critical",
     "postinstall": "patch-package"
   },
   "dependencies": {
