@@ -3279,7 +3279,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
         try {
           m4aPath = await convertToM4a(oggPath);
           // Upload to Zalo CDN to get a voiceUrl
-          const uploaded = await api.uploadAttachment(m4aPath, zaloId, threadType) as Array<{ fileUrl?: string, fileId?: string, checksum?: string }>;
+          const uploaded = await api.uploadAttachment(m4aPath, zaloId, threadType) as Array<{ fileUrl?: string, fileId?: string, checksum?: string, fileSize?: number }>;
           const voiceUpload = uploaded[0];
           const voiceUrl = voiceUpload?.fileUrl;
           if (!voiceUrl) throw new Error('No fileUrl from uploadAttachment');
@@ -3292,7 +3292,8 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
               voiceUrl, 
               duration: voiceDurationMs,
               fileId: voiceUpload.fileId,
-              checksum: voiceUpload.checksum
+              checksum: voiceUpload.checksum,
+              fileSize: voiceUpload.fileSize
             } as any,
             zaloId,
             threadType,

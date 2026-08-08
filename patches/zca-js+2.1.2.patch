@@ -106,24 +106,51 @@ index 03c818c..e134662 100644
                          ext: {
                              sSrcType: -1,
 diff --git a/node_modules/zca-js/dist/apis/sendVoice.d.ts b/node_modules/zca-js/dist/apis/sendVoice.d.ts
-index c04c728..daa8dc4 100644
+index c04c728..7355776 100644
 --- a/node_modules/zca-js/dist/apis/sendVoice.d.ts
 +++ b/node_modules/zca-js/dist/apis/sendVoice.d.ts
-@@ -1,6 +1,9 @@
+@@ -1,6 +1,10 @@
  import { ThreadType } from "../models/index.js";
  export type SendVoiceOptions = {
      voiceUrl: string;
 +    duration?: number;
 +    fileId?: string;
 +    checksum?: string;
++    fileSize?: number;
      /**
       * Time to live in milliseconds (default: 0)
       */
 diff --git a/node_modules/zca-js/dist/apis/sendVoice.js b/node_modules/zca-js/dist/apis/sendVoice.js
-index f8bcc6b..3293161 100644
+index f8bcc6b..d05257b 100644
 --- a/node_modules/zca-js/dist/apis/sendVoice.js
 +++ b/node_modules/zca-js/dist/apis/sendVoice.js
-@@ -39,6 +39,9 @@ export const sendVoiceFactory = apiFactory()((api, ctx, utils) => {
+@@ -19,15 +19,18 @@ export const sendVoiceFactory = apiFactory()((api, ctx, utils) => {
+         var _a, _b;
+         let fileSize = null;
+         const clientId = Date.now().toString();
+-        try {
+-            const headResponse = await utils.request(options.voiceUrl, { method: "HEAD" }, true);
+-            if (headResponse.ok) {
+-                fileSize = parseInt(headResponse.headers.get("content-length") || "0");
++        if (options.fileSize) {
++            fileSize = options.fileSize;
++        } else {
++            try {
++                const headResponse = await utils.request(options.voiceUrl, { method: "HEAD" }, true);
++                if (headResponse.ok) {
++                    fileSize = parseInt(headResponse.headers.get("content-length") || "0");
++                }
++            } catch (error) {
++                // Ignore
+             }
+         }
+-        catch (error) {
+-            throw new ZaloApiError(`Unable to get voice content: ${error instanceof Error ? error.message : String(error)}`);
+-        }
+         const params = type === ThreadType.User
+             ? {
+                 toId: threadId,
+@@ -39,6 +42,9 @@ export const sendVoiceFactory = apiFactory()((api, ctx, utils) => {
                      voiceUrl: options.voiceUrl,
                      m4aUrl: options.voiceUrl,
                      fileSize: fileSize !== null && fileSize !== void 0 ? fileSize : 0,
@@ -133,7 +160,7 @@ index f8bcc6b..3293161 100644
                  }),
                  imei: ctx.imei,
              }
-@@ -53,6 +56,9 @@ export const sendVoiceFactory = apiFactory()((api, ctx, utils) => {
+@@ -53,6 +59,9 @@ export const sendVoiceFactory = apiFactory()((api, ctx, utils) => {
                      voiceUrl: options.voiceUrl,
                      m4aUrl: options.voiceUrl,
                      fileSize: fileSize !== null && fileSize !== void 0 ? fileSize : 0,
