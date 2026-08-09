@@ -71,7 +71,13 @@ export function getSharedTempRoot(): string {
 
   // In local mode the Bot API server reads file:// paths from its own
   // filesystem namespace. The project mounts /tmp into both containers/processes.
-  if (config.telegram.localServer && process.platform !== 'win32') return '/tmp';
+  if (config.telegram.localServer && process.platform !== 'win32') {
+    try {
+      return require('fs').realpathSync('/tmp');
+    } catch {
+      return '/tmp';
+    }
+  }
 
   return os.tmpdir();
 }
