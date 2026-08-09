@@ -1277,10 +1277,9 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const details: any[] = await api.getStickersDetail([stickerId]);
           const detail = details?.[0];
-          // Animated stickers only have stickerSpriteUrl (sprite sheet) — no static webp/url
-          const isAnimated = !detail?.stickerWebpUrl && !detail?.stickerUrl && !!detail?.stickerSpriteUrl;
+          const isAnimated = !!detail?.stickerSpriteUrl && (detail?.totalFrames > 1 || !detail?.stickerWebpUrl);
           const url: string | undefined =
-            detail?.stickerWebpUrl ?? detail?.stickerUrl ?? detail?.stickerSpriteUrl;
+            (isAnimated ? detail?.stickerSpriteUrl : undefined) ?? detail?.stickerWebpUrl ?? detail?.stickerUrl ?? detail?.stickerSpriteUrl;
           if (!url) {
             console.warn('[ZaloHandler] Sticker: no URL in detail:', detail);
             return;
