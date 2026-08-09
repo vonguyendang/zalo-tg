@@ -121,7 +121,7 @@ index c04c728..7355776 100644
       * Time to live in milliseconds (default: 0)
       */
 diff --git a/node_modules/zca-js/dist/apis/sendVoice.js b/node_modules/zca-js/dist/apis/sendVoice.js
-index f8bcc6b..9750ec1 100644
+index f8bcc6b..995af05 100644
 --- a/node_modules/zca-js/dist/apis/sendVoice.js
 +++ b/node_modules/zca-js/dist/apis/sendVoice.js
 @@ -19,15 +19,18 @@ export const sendVoiceFactory = apiFactory()((api, ctx, utils) => {
@@ -155,22 +155,26 @@ index f8bcc6b..9750ec1 100644
                  msgInfo: JSON.stringify({
                      voiceUrl: options.voiceUrl,
 -                    m4aUrl: options.voiceUrl,
-+                    m4a: options.voiceUrl,
++                    m4a: options.voiceUrl, m4aUrl: options.voiceUrl,
                      fileSize: fileSize !== null && fileSize !== void 0 ? fileSize : 0,
 +                    duration: options.duration || 0,
 +                    fileId: options.fileId || "",
 +                    checksum: options.checksum || "",
-+                    waveformSamples: [0, 50, 100, 150, 200, 250, 300, 250, 200, 150, 100, 50, 0],
++                    waveformSamples: [0,234,445,615,1083,844,378,319,309,299,303,284,261,269,272,249,244,256,245,270,271,313,371],
                  }),
                  imei: ctx.imei,
              }
-@@ -53,6 +60,9 @@ export const sendVoiceFactory = apiFactory()((api, ctx, utils) => {
+@@ -51,8 +58,13 @@ export const sendVoiceFactory = apiFactory()((api, ctx, utils) => {
+                 clientId: clientId,
+                 msgInfo: JSON.stringify({
                      voiceUrl: options.voiceUrl,
++                    m4a: options.voiceUrl, m4aUrl: options.voiceUrl,
                      m4aUrl: options.voiceUrl,
                      fileSize: fileSize !== null && fileSize !== void 0 ? fileSize : 0,
 +                    duration: options.duration || 0,
 +                    fileId: options.fileId || "",
 +                    checksum: options.checksum || "",
++                    waveformSamples: [0,234,445,615,1083,844,378,319,309,299,303,284,261,269,272,249,244,256,245,270,271,313,371],
                  }),
                  imei: ctx.imei,
              };

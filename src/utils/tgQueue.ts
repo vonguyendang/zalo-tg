@@ -66,7 +66,7 @@ async function runOne(item: QueueItem, isText: boolean): Promise<void> {
 
     const timeoutPromise = new Promise<never>((_, reject) => {
       // 10 minutes timeout to allow large file uploads (up to 2GB)
-      timeoutId = setTimeout(() => reject(new Error('TG_API_TIMEOUT: Local bot API server hung')), 600000);
+      timeoutId = setTimeout(() => reject(new Error('TG_API_TIMEOUT: Local bot API server hung')), 120000);
     });
 
     console.log(`[tgQueue] Starting execution. isText=${isText}`);
@@ -87,14 +87,24 @@ async function runOne(item: QueueItem, isText: boolean): Promise<void> {
       const delay = (retryAfter + 1) * 1000;
       console.warn(`[TGQueue] 429 — retry #${item.retries + 1} after ${retryAfter}s (${isText ? 'text' : 'media'} queue)`);
       _pauseUntil = Math.max(_pauseUntil, Date.now() + delay);
+
+      // Desktop notification for long rate limits so user is aware
+      if (retryAfter > 60) {
+        const mins = Math.ceil(retryAfter / 60);
+        try {
+          const { exec } = await import('child_process');
+          exec(`osascript -e 'display notification "Telegram rate-limit ${mins} phút. Bot tạm ngừng gửi tin." with title "⚠️ Zalo-TG Bot" sound name "Ping"'`);
+        } catch { /* ignore notification errors */ }
+      }
       // Re-queue at the front so it goes next once the pause expires
       if (isText) {
         _textQueue.unshift({ ...item, retries: item.retries + 1 });
       } else {
         _mediaQueue.unshift({ ...item, retries: item.retries + 1 });
       }
-    } else if (isTimeout && item.retries < MAX_RETRIES) {
-      console.error(`[TGQueue] API timeout! Self-healing retry #${item.retries + 1}...`);
+    } else if (isTimeout && item.retries < (isText ? MAX_RETRIES : 1)) {
+      // Media timeout: only retry once — same broken video will just hang again
+      console.error(`[TGQueue] API timeout! Self-healing retry #${item.retries + 1}... (${isText ? 'text' : 'media'})`);
       try {
         if (item.retries >= 1) {
           console.error(`[TGQueue] API timeout persists! Wiping telegram-bot-api database...`);

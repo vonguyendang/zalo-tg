@@ -9,7 +9,7 @@ import { ZALO_MSG_TYPES } from './types.js';
 import { store, accountAliasStore } from '../store.js';
 import { tgBot } from '../telegram/bot.js';
 import { config } from '../config.js';
-import { downloadToTemp, cleanTemp, convertToOgg, convertSpriteSheetToGif } from '../utils/media.js';
+import { downloadToTemp, cleanTemp, convertToOgg, convertSpriteSheetToWebm, convertImageToWebpSticker, convertMp4ToWebmSticker } from '../utils/media.js';
 import { applyZaloMarkupHtml, formatGroupMsgHtml, formatGroupMsg, groupCaption, topicName, truncate, escapeHtml } from '../utils/format.js';
 import { extractHiddenData } from '../utils/steganography.js';
 import { maybeAutoReply } from './autoReply.js';
@@ -1034,14 +1034,15 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         }
         if (!url) { console.warn('[ZaloHandler] Photo: no URL found in content:', media); return; }
 
-        // Caption attached to the photo by the sender (Zalo stores it in the `title` field)
-        const photoCaption = media.title?.trim() || undefined;
+        const { hiddenData, cleanText } = extractHiddenData(media.title ?? '');
+        const photoCaption = cleanText.trim() || undefined;
+        let zlType = undefined;
+        if (hiddenData?.startsWith('zl_type:')) {
+          zlType = hiddenData.slice(8);
+        }
 
         const childnumber: number = (media as { childnumber?: number }).childnumber ?? 0;
         const albumKey = `${zaloId}:${senderUid}`;
-
-        // If childnumber > 0 OR there's already a buffer for this key → album mode
-        // (detected via the add callback which reuses or creates the buffer)
 
         console.log(`[ZaloHandler DEBUG] ABOUT TO CALL zaloAlbumStore.add for ${albumKey} msgId=${zaloMsgIds[0]}`);
         zaloAlbumStore.add(
@@ -1049,11 +1050,10 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
           url,
           zaloMsgIds,
           photoCaption,
-          { senderName: bridgeSenderName, topicId, tgBase, zaloQuote: zaloQuoteData, delaySuffix: timeSuffix },
+          { senderName: bridgeSenderName, topicId, tgBase, zaloQuote: zaloQuoteData, delaySuffix: timeSuffix, zlType },
           async (buf: any) => {
             console.log(`[ZaloHandler DEBUG] onFlush triggered for single photo`);
             if (buf.items.length === 1) {
-              // Single photo — reuse eagerly started download (likely already done)
               const singleUrl = buf.items[0].url;
               console.log(`[ZaloHandler DEBUG] single photo awaiting earlyDlPromise`);
               const localPath = await (earlyDlPromise ?? downloadToTemp(singleUrl, `photo_${Date.now()}.jpg`));
@@ -1068,7 +1068,28 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
                     : groupCaption(buf.senderName, buf.delaySuffix)),
                 };
 
-                if (localPath.toLowerCase().endsWith('.gif')) {
+                if (buf.zlType === 'tg_static_sticker') {
+                  console.log(`[ZaloHandler DEBUG] single photo is tg_static_sticker, calling sendSticker`);
+                  const webpPath = await convertImageToWebpSticker(localPath);
+                  try {
+                    sent = await tg.sendSticker(
+                      config.telegram.groupId,
+                      config.telegram.localServer ? 'file://' + webpPath : { source: webpPath, filename: 'sticker.webp' },
+                      buf.tgBase
+                    );
+                    
+                    // Send caption/name separately since stickers don't have captions
+                    const animCaption = `${groupCaption(buf.senderName)} <i>(sticker tĩnh)</i>`;
+                    if (buf.senderName) {
+                      await tg.sendMessage(config.telegram.groupId, animCaption, {
+                        reply_parameters: { message_id: sent.message_id },
+                        parse_mode: 'HTML'
+                      });
+                    }
+                  } finally {
+                    await cleanTemp(webpPath);
+                  }
+                } else if (localPath.toLowerCase().endsWith('.gif')) {
                   console.log(`[ZaloHandler DEBUG] single photo calling tg.sendAnimation for GIF`);
                   sent = await tg.sendAnimation(
                     config.telegram.groupId,
@@ -1227,23 +1248,69 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
           } catch { }
         }
         
+        let zlType = undefined;
         if (hiddenData?.startsWith('zl_vid_url:')) {
           url = hiddenData.slice(11);
           console.log(`[ZaloHandler] Found hidden video URL from bridged message, bypassing Zalo crop: ${url}`);
+        } else if (hiddenData?.startsWith('zl_type:')) {
+          zlType = hiddenData.slice(8);
         }
         
         if (!url) { console.warn('[ZaloHandler] Video: no URL found in content:', media); return; }
         const localPath = await (earlyDlPromise ?? downloadToTemp(url, `video_${Date.now()}.mp4`));
+        const thumbUrl = media.thumb;
+        const thumbPath = thumbUrl ? await downloadToTemp(thumbUrl, `thumb_${Date.now()}.jpg`).catch(() => undefined) : undefined;
         const finalFileName = `zalo_video_${Date.now()}.mp4`;
         try {
-          const sent = await tg.sendVideo(config.telegram.groupId, { source: localPath, filename: finalFileName }, {
-            ...tgOpts,
-            width: vWidth,
-            height: vHeight,
-            duration: vDuration ? Math.floor(vDuration / 1000) : undefined,
-          });
+          let sent;
+          if (zlType === 'tg_anim_sticker') {
+            console.log(`[ZaloHandler DEBUG] Video is tg_anim_sticker, converting to WebM sticker`);
+            const webmPath = await convertMp4ToWebmSticker(localPath);
+            try {
+              sent = await tg.sendSticker(
+                config.telegram.groupId,
+                config.telegram.localServer ? 'file://' + webmPath : { source: webmPath, filename: 'sticker.webm' },
+                tgOpts as any
+              );
+              
+              // Send caption/name separately since stickers don't have captions
+              const animCaption = `${groupCaption(bridgeSenderName)} <i>(sticker động)</i>`;
+              if (bridgeSenderName) {
+                await tg.sendMessage(config.telegram.groupId, animCaption, {
+                  reply_parameters: { message_id: sent.message_id },
+                  parse_mode: 'HTML'
+                });
+              }
+            } finally {
+              await cleanTemp(webmPath);
+            }
+          } else if (zlType === 'tg_gif') {
+            console.log(`[ZaloHandler DEBUG] Video is tg_gif, sending as Animation`);
+            sent = await tg.sendAnimation(config.telegram.groupId, config.telegram.localServer ? 'file://' + localPath : { source: localPath }, {
+              ...tgOpts,
+              width: vWidth,
+              height: vHeight,
+              duration: vDuration ? Math.floor(vDuration / 1000) : undefined,
+            });
+          } else {
+            const videoPayload = config.telegram.localServer ? 'file://' + localPath : { source: localPath };
+            const thumbPayload = thumbPath 
+              ? (config.telegram.localServer ? 'file://' + thumbPath : { source: thumbPath }) 
+              : undefined;
+              
+            sent = await tg.sendVideo(config.telegram.groupId, videoPayload, {
+              ...tgOpts,
+              width: vWidth,
+              height: vHeight,
+              duration: vDuration ? Math.floor(vDuration / 1000) : undefined,
+              ...(thumbPayload ? { thumbnail: thumbPayload as any } : {})
+            });
+          }
           saveTgMapping(sent);
-        } finally { await cleanTemp(localPath); }
+        } finally { 
+          await cleanTemp(localPath); 
+          if (thumbPath) await cleanTemp(thumbPath); 
+        }
         return;
       }
 
@@ -1295,16 +1362,22 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
             if (isAnimated) {
               let gifPath: string | undefined;
               try {
-                gifPath = await convertSpriteSheetToGif(localPath, detail?.totalFrames || 0, 100);
-                const animCaption = `${groupCaption(bridgeSenderName)} <i>(sticker động)</i>`;
-                sent = await tg.sendAnimation(
+                gifPath = await convertSpriteSheetToWebm(localPath, detail?.totalFrames || 0, 100);
+                // Send as Video Sticker (Telegram natively supports .webm for this, keeping transparency)
+                sent = await tg.sendSticker(
                   config.telegram.groupId, 
-                  config.telegram.localServer ? 'file://' + gifPath : { source: gifPath, filename: 'sticker.gif' }, 
-                  {
-                    ...tgBase,
-                  caption: animCaption,
-                  parse_mode: 'HTML',
-                });
+                  config.telegram.localServer ? 'file://' + gifPath : { source: gifPath, filename: 'sticker.webm' }, 
+                  tgBase as Parameters<typeof tg.sendSticker>[2]
+                );
+                
+                // Stickers don't support captions, so we reply with the sender name
+                const animCaption = `${groupCaption(bridgeSenderName)} <i>(sticker động)</i>`;
+                if (bridgeSenderName) {
+                  await tg.sendMessage(config.telegram.groupId, animCaption, {
+                    reply_parameters: { message_id: sent.message_id },
+                    parse_mode: 'HTML'
+                  });
+                }
               } catch (animErr) {
                 console.error('[ZaloHandler] Failed to convert animated sticker to GIF, falling back to photo:', animErr);
                 const animCaption = `${groupCaption(bridgeSenderName)} <i>(sticker động 🎥)</i>`;

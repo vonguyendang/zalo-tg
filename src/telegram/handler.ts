@@ -43,7 +43,7 @@ import type { ZaloAPI } from '../zalo/types.js';
 import { store, msgStore, userCache, friendsCache, groupsCache, sentMsgStore, pollStore, mediaGroupStore, reactionEchoStore, reactionSummaryStore, reactionEventDedupeStore, aliasCache, markRecalled, accountAliasStore, type ZaloQuoteData } from '../store.js';
 import { tgBot, BOT_COMMANDS, COMMAND_DETAILS } from './bot.js';
 import { config } from '../config.js';
-import { downloadToTemp, cleanTemp, convertToAac, extractVideoThumbnail, convertWebmToGif } from '../utils/media.js';
+import { downloadToTemp, cleanTemp, convertToMp3, extractVideoThumbnail, convertWebmToGif, convertAnimatedToMp4, convertTgsToGif } from '../utils/media.js';
 import { triggerQRLogin, getAllZaloApis, cancelActiveQRLogin } from '../zalo/client.js';
 import { triggerAppLogin, cancelActiveAppLogin } from '../zalo/loginApp.js';
 import { invalidateAppSession, appGetReceivedFriendRequests, appGetSentFriendRequests, appGetGroupInfo, appGetGroupMembersInfo, appGetFriendProfilesV2, appRequestVoiceCall, appRequestGroupVoiceCall } from '../zalo/appApi.js';
@@ -2896,12 +2896,94 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
         );
       };
 
+      const sendZaloVideoWithThumbnail = async (
+        localVideoPath: string,
+        caption?: string,
+        zlType?: string,
+      ) => {
+        const thumbPath = await extractVideoThumbnail(localVideoPath);
+        try {
+          // Detect video dimensions and duration via ffprobe
+          let vWidth: number | undefined;
+          let vHeight: number | undefined;
+          let vDuration: number | undefined;
+          try {
+            const probeResult = await execFileAsync('ffprobe', [
+              '-v', 'error',
+              '-select_streams', 'v:0',
+              '-show_entries', 'stream=width,height',
+              '-show_entries', 'format=duration',
+              '-of', 'json',
+              localVideoPath,
+            ]);
+            const probe = JSON.parse(probeResult.stdout);
+            vWidth = probe.streams?.[0]?.width;
+            vHeight = probe.streams?.[0]?.height;
+            const dur = parseFloat(probe.format?.duration);
+            if (Number.isFinite(dur) && dur > 0) vDuration = Math.round(dur * 1000);
+          } catch { /* ignore probe errors, width/height will be undefined */ }
+
+          const uploadedThumb = await api.uploadAttachment(thumbPath, zaloId, threadType);
+          const uploadedVideo = await api.uploadAttachment(localVideoPath, zaloId, threadType);
+          
+          if (!uploadedVideo || !uploadedVideo[0] || !uploadedThumb || !uploadedThumb[0]) {
+            throw new Error('Failed to upload video or thumbnail to Zalo');
+          }
+
+          const videoData = uploadedVideo[0];
+          const thumbData = uploadedThumb[0];
+
+          if (videoData.fileType !== 'video') throw new Error(`Unexpected fileType: ${videoData.fileType}`);
+
+          const accountId = entry.accountId || 'default';
+          sentMsgStore.markSending(accountId, zaloId);
+          
+          const thumbUrl = ('normalUrl' in thumbData ? thumbData.normalUrl : (thumbData as any).thumbUrl);
+          
+          const sendResult = await api.sendVideo({
+            msg: zlType ? encodeHiddenData('zl_type:' + zlType) : undefined,
+            videoUrl: (videoData as any).fileUrl,
+            thumbnailUrl: thumbUrl,
+            fileId: (videoData as any).fileId,
+            checksum: (videoData as any).checksum,
+            fileSize: (videoData as any).totalSize,
+            width: vWidth,
+            height: vHeight,
+            duration: vDuration,
+          }, zaloId, threadType) as { message?: { msgId?: number } | null; attachment?: Array<{ msgId?: number }> };
+          
+          const zaloMsgId = sendResult?.message?.msgId ?? sendResult?.attachment?.[0]?.msgId;
+          if (zaloMsgId !== undefined) {
+            sentMsgStore.save(msg.message_id, { accountId, msgIds: [zaloMsgId], zaloId, threadType });
+            const ownUid = String(api.getOwnId?.() ?? '');
+            msgStore.save(accountId, msg.message_id, [String(zaloMsgId)], {
+              msgId: String(zaloMsgId),
+              cliMsgId: '',
+              uidFrom: ownUid,
+              ts: String(Math.floor(Date.now() / 1000)),
+              msgType: 'webchat',
+              content: '[Video]',
+              ttl: 0,
+              zaloId,
+              threadType,
+            });
+          }
+          
+          if (caption) {
+            await api.sendMessage(caption, zaloId, threadType);
+          }
+        } finally {
+          await cleanTemp(thumbPath);
+        }
+      };
+
       const sendAttachment = async (
         fileId: string,
         filename: string,
         fileSize?: number,
         caption?: string,
         captionMentions?: Array<{ pos: number; uid: string; len: number }>,
+        zlType?: string,
       ) => {
         if (fileSize !== undefined && fileSize > TG_FILE_LIMIT) {
           await notifyTooBig(filename, fileSize);
@@ -2952,6 +3034,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
           // When no caption, skip the quote — adding a placeholder text just to
           // carry the quote would create visible noise in the conversation.
           const effectiveCaption = caption ?? '';
+          const finalCaption = zlType ? encodeHiddenData('zl_type:' + zlType) + effectiveCaption : effectiveCaption;
 
           let attachmentSource: AttachmentSource[] = [localPath];
           if (!['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4'].includes(path.extname(filename).slice(1).toLowerCase())) {
@@ -2965,9 +3048,9 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
 
           const sendResult = await api.sendMessage(
             {
-              msg: effectiveCaption,
+              msg: finalCaption,
               attachments: attachmentSource,
-              ...(effectiveCaption.length && zaloQuote ? { quote: zaloQuote as any } : {}),
+              ...(finalCaption.length && zaloQuote ? { quote: zaloQuote as any } : {}),
               ...(captionMentions?.length ? { mentions: captionMentions } : {}),
             },
             zaloId,
@@ -2979,7 +3062,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
               console.warn('[TG→Zalo] code 114 on attachment+quote, retrying without quote');
               return api.sendMessage(
                 {
-                  msg: effectiveCaption,
+                  msg: finalCaption,
                   attachments: attachmentSource,
                   ...(captionMentions?.length ? { mentions: captionMentions } : {}),
                 },
@@ -3141,9 +3224,15 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       }
 
       if ('animation' in msg && msg.animation) {
-        const fname = msg.animation.file_name ?? 'animation.gif';
-        const { cap, capMentions } = getCaptionMentions();
-        await sendAttachment(msg.animation.file_id, fname, msg.animation.file_size, cap, capMentions);
+        const fname = msg.animation.file_name ?? 'animation.mp4';
+        const { cap } = getCaptionMentions();
+        const fileLink = await ctx.telegram.getFileLink(msg.animation.file_id);
+        const localVideoPath = await downloadToTemp(fileLink.toString(), fname);
+        try {
+          await sendZaloVideoWithThumbnail(localVideoPath, cap, 'tg_gif');
+        } finally {
+          await cleanTemp(localVideoPath);
+        }
         return;
       }
 
@@ -3275,15 +3364,16 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
           throw err;
         }
         const oggPath  = await downloadToTemp(fileLink.toString(), `voice_${Date.now()}.ogg`);
-        let aacPath: string | undefined;
+        let mp3Path: string | undefined;
         try {
-          aacPath = await convertToAac(oggPath);
-          const aacStat = await stat(aacPath);
+          mp3Path = await convertToMp3(oggPath);
+          const mp3Stat = await stat(mp3Path!);
           // Upload to Zalo CDN to get a voiceUrl
-          const uploaded = await api.uploadAttachment(aacPath, zaloId, threadType) as Array<{ fileUrl?: string, fileId?: string, checksum?: string, fileSize?: number }>;
+          const uploaded = await api.uploadAttachment(mp3Path!, zaloId, threadType) as Array<{ fileUrl?: string, fileId?: string, checksum?: string, fileSize?: number }>;
           const voiceUpload = uploaded[0];
-          const voiceUrl = voiceUpload?.fileUrl;
+          let voiceUrl = voiceUpload?.fileUrl;
           if (!voiceUrl) throw new Error('No fileUrl from uploadAttachment');
+          
           console.log(`[TG→Zalo] Sending voice → ${voiceUrl}`);
           // Zalo mobile relies heavily on duration metadata for native voice UX.
           // Keep the value in milliseconds to match zca-js video/voice internals.
@@ -3292,9 +3382,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
             { 
               voiceUrl, 
               duration: voiceDurationMs,
-              fileId: voiceUpload.fileId,
-              checksum: voiceUpload.checksum,
-              fileSize: aacStat.size
+              fileSize: mp3Stat.size
             } as any,
             zaloId,
             threadType,
@@ -3322,7 +3410,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
           await sendAttachment(msg.voice.file_id, `voice_${Date.now()}.ogg`);
         } finally {
           await cleanTemp(oggPath);
-          if (aacPath) await cleanTemp(aacPath);
+          if (mp3Path) await cleanTemp(mp3Path);
         }
         return;
       }
@@ -3330,54 +3418,57 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
       if ('sticker' in msg && msg.sticker) {
         const sticker = msg.sticker;
         if (sticker.is_video) {
-          // Video sticker (.webm) → convert to GIF so Zalo shows an animation
+          // Video sticker (.webm) → convert to mp4 and send as playable Zalo video
           let webmPath: string | null = null;
-          let gifPath:  string | null = null;
+          let mp4Path:  string | null = null;
           try {
             const fileLink = await ctx.telegram.getFileLink(sticker.file_id);
             webmPath = await downloadToTemp(fileLink.toString(), `sticker_${Date.now()}.webm`);
-            gifPath  = await convertWebmToGif(webmPath);
-            const accountId = entry.accountId || 'default';
-            sentMsgStore.markSending(accountId, zaloId);
-            try {
-              const sendResult = await api.sendMessage(
-                { msg: '', attachments: [gifPath] }, zaloId, threadType,
-              ) as { message?: { msgId?: number } | null; attachment?: Array<{ msgId?: number }> };
-              const zaloMsgId = sendResult?.message?.msgId ?? sendResult?.attachment?.[0]?.msgId;
-              if (zaloMsgId !== undefined) {
-                sentMsgStore.save(msg.message_id, { accountId, msgIds: [zaloMsgId], zaloId, threadType });
-                const ownUid = String(api.getOwnId?.() ?? '');
-                msgStore.save(accountId, msg.message_id, [String(zaloMsgId)], {
-                  msgId: String(zaloMsgId),
-                  cliMsgId: '',
-                  uidFrom: ownUid,
-                  ts: String(Math.floor(Date.now() / 1000)),
-                  msgType: 'webchat',
-                  content: '[Sticker]',
-                  ttl: 0,
-                  zaloId,
-                  threadType: entry.type,
-                });
-              }
-            } finally {
-              sentMsgStore.unmarkSending(accountId, zaloId);
-            }
+            mp4Path  = await convertAnimatedToMp4(webmPath);
+            await sendZaloVideoWithThumbnail(mp4Path, undefined, 'tg_anim_sticker');
           } catch (err) {
-            console.error('[TG→Zalo] sticker webm→gif failed, falling back to thumbnail:', err);
+            console.error('[TG→Zalo] sticker webm→mp4 failed, falling back to thumbnail:', err);
             // Fallback: send jpg thumbnail
             const thumbId = sticker.thumbnail?.file_id;
             if (thumbId) await sendAttachment(thumbId, `sticker_${Date.now()}.jpg`);
           } finally {
             if (webmPath) await cleanTemp(webmPath);
-            if (gifPath)  await cleanTemp(gifPath);
+            if (mp4Path)  await cleanTemp(mp4Path);
+          }
+        } else if (sticker.is_animated) {
+          // Animated sticker (.tgs/Lottie) → convert to gif → convert to mp4
+          let tgsPath: string | null = null;
+          let gifPath: string | null = null;
+          let mp4Path: string | null = null;
+          try {
+            console.log('[TG→Zalo] Animated sticker detected, starting tgs→gif→mp4 pipeline...');
+            const fileLink = await ctx.telegram.getFileLink(sticker.file_id);
+            console.log('[TG→Zalo] TGS file link:', fileLink.toString());
+            tgsPath = await downloadToTemp(fileLink.toString(), `sticker_${Date.now()}.tgs`);
+            const { stat: fsStat } = await import('fs/promises');
+            const tgsSize = (await fsStat(tgsPath)).size;
+            console.log(`[TG→Zalo] TGS downloaded: ${tgsPath} (${tgsSize} bytes)`);
+            gifPath = await convertTgsToGif(tgsPath);
+            const gifSize = (await fsStat(gifPath)).size;
+            console.log(`[TG→Zalo] GIF created: ${gifPath} (${gifSize} bytes)`);
+            mp4Path = await convertAnimatedToMp4(gifPath);
+            const mp4Size = (await fsStat(mp4Path)).size;
+            console.log(`[TG→Zalo] MP4 created: ${mp4Path} (${mp4Size} bytes)`);
+            await sendZaloVideoWithThumbnail(mp4Path, undefined, 'tg_anim_sticker');
+            console.log('[TG→Zalo] Animated sticker sent as video to Zalo OK');
+          } catch (err) {
+            console.error('[TG→Zalo] sticker tgs→mp4 failed, falling back to thumbnail:', err);
+            // Fallback: send jpg thumbnail
+            const thumbId = sticker.thumbnail?.file_id;
+            if (thumbId) await sendAttachment(thumbId, `sticker_${Date.now()}.jpg`);
+          } finally {
+            if (tgsPath) await cleanTemp(tgsPath);
+            if (gifPath) await cleanTemp(gifPath);
+            if (mp4Path) await cleanTemp(mp4Path);
           }
         } else {
-          // Animated sticker (.tgs/Lottie) → no lightweight converter, use jpg thumbnail
           // Static sticker (.webp) → send as-is
-          const useThumb = sticker.is_animated && sticker.thumbnail;
-          const fileId   = useThumb ? sticker.thumbnail!.file_id : sticker.file_id;
-          const ext      = useThumb ? '.jpg' : '.webp';
-          await sendAttachment(fileId, `sticker_${Date.now()}${ext}`);
+          await sendAttachment(sticker.file_id, `sticker_${Date.now()}.webp`, undefined, undefined, undefined, 'tg_static_sticker');
         }
         return;
       }

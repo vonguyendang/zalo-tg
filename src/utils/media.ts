@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { createWriteStream, mkdirSync, copyFileSync } from 'fs';
-import { readFile, stat, unlink, writeFile, rmdir } from 'fs/promises';
+import { readFile, stat, unlink, writeFile, rmdir, rm } from 'fs/promises';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { gunzipSync } from 'zlib';
@@ -227,14 +227,14 @@ export function getSpriteSheetLayout(
   return { frames: 1, frameWidth: width, frameHeight: height, direction: 'horizontal' };
 }
 
-/** Convert a Zalo PNG/WebP sprite strip into a Telegram-compatible GIF. */
-export async function convertSpriteSheetToGif(
+/** Convert a Zalo PNG/WebP sprite strip into a Telegram-compatible WebM (with transparency). */
+export async function convertSpriteSheetToWebm(
   inputPath: string,
   declaredFrames: number,
   frameDurationMs: number,
 ): Promise<string> {
   mkdirSync(TMP_DIR, { recursive: true });
-  const { createCanvas, loadImage, GifEncoder, GifDisposal } = await import('@napi-rs/canvas');
+  const { createCanvas, loadImage } = await import('@napi-rs/canvas');
   
   const image = await loadImage(inputPath);
   if (!image.width || !image.height) throw new Error('Cannot read sticker sprite dimensions');
@@ -244,33 +244,43 @@ export async function convertSpriteSheetToGif(
   const duration = Number.isFinite(frameDurationMs)
     ? Math.min(1_000, Math.max(20, frameDurationMs))
     : 100;
+  const fps = Math.round(1000 / duration);
 
-  const outputPath = uniqueTempName('zalo_sticker', '.gif');
+  const outputPath = uniqueTempName('zalo_sticker', '.webm');
+  const frameDir = uniqueTempName('frames_', '');
+  mkdirSync(frameDir);
+
   const canvas = createCanvas(layout.frameWidth, layout.frameHeight);
   const ctx = canvas.getContext('2d');
-  const encoder = new GifEncoder(layout.frameWidth, layout.frameHeight, { repeat: 0, quality: 5 });
+  try {
+    for (let frame = 0; frame < layout.frames; frame++) {
+      ctx.clearRect(0, 0, layout.frameWidth, layout.frameHeight);
+      let sx = 0, sy = 0;
+      if (layout.direction === 'horizontal') sx = frame * layout.frameWidth;
+      else sy = frame * layout.frameHeight;
+      ctx.drawImage(image, sx, sy, layout.frameWidth, layout.frameHeight, 0, 0, layout.frameWidth, layout.frameHeight);
+      const pngBuffer = await canvas.encode('png');
+      await writeFile(`${frameDir}/${frame.toString().padStart(3, '0')}.png`, pngBuffer);
+    }
 
-  for (let i = 0; i < layout.frames; i++) {
-    ctx.clearRect(0, 0, layout.frameWidth, layout.frameHeight);
-    
-    const sx = layout.direction === 'horizontal' ? i * layout.frameWidth : 0;
-    const sy = layout.direction === 'vertical' ? i * layout.frameHeight : 0;
-    
-    ctx.drawImage(
-      image,
-      sx, sy, layout.frameWidth, layout.frameHeight,
-      0, 0, layout.frameWidth, layout.frameHeight
-    );
-    
-    const rgba = ctx.getImageData(0, 0, layout.frameWidth, layout.frameHeight).data;
-    encoder.addFrame(new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength), layout.frameWidth, layout.frameHeight, {
-      delay: duration,
-      disposal: GifDisposal.Background,
+    await new Promise<void>((resolve, reject) => {
+      const ff = spawn('ffmpeg', [
+        '-y', '-framerate', String(fps),
+        '-i', `${frameDir}/%03d.png`,
+        '-vf', "scale='if(gt(iw/ih,1),512,-1)':'if(gt(iw/ih,1),-1,512)'",
+        '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p',
+        '-auto-alt-ref', '0', '-b:v', '500k',
+        '-t', '3.0',
+        outputPath
+      ]);
+      ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg webm exit ${code}`)));
+      ff.on('error', reject);
     });
-  }
 
-  await writeFile(outputPath, encoder.finish());
-  return outputPath;
+    return outputPath;
+  } finally {
+    await rm(frameDir, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
 /**
@@ -295,17 +305,16 @@ export async function convertToOgg(inputPath: string): Promise<string> {
 }
 
 /**
- * Convert an audio file to AAC (ADTS) using ffmpeg.
+ * Convert an audio file to mp3 using ffmpeg.
  * Returns the path to the converted file (caller must clean it up).
  */
-export async function convertToAac(inputPath: string): Promise<string> {
+export async function convertToMp3(inputPath: string): Promise<string> {
   mkdirSync(TMP_DIR, { recursive: true });
-  const outputPath = uniqueTempName('voice', '.aac');
+  const outputPath = uniqueTempName('voice', '.mp3');
   await new Promise<void>((resolve, reject) => {
     const ff = spawn('ffmpeg', [
       '-y', '-i', inputPath,
-      // Keep an iOS/Android-friendly AAC-LC profile. Zalo uses raw AAC streams.
-      '-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '64k', '-ac', '1', '-ar', '44100',
+      '-c:a', 'libmp3lame', '-b:a', '64k', '-ac', '1', '-ar', '44100',
       '-vn', outputPath,
     ]);
     ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}`)));
@@ -364,83 +373,39 @@ export async function convertStickerToPng(inputPath: string): Promise<string> {
   return outputPath;
 }
 
-/** Render Telegram's gzip-compressed Lottie/TGS sticker to a transparent GIF. */
+/** Render Telegram's gzip-compressed Lottie/TGS sticker to a GIF via Python lottie library. */
 export async function convertTgsToGif(inputPath: string): Promise<string> {
   mkdirSync(TMP_DIR, { recursive: true });
-  const compressed = await readFile(inputPath);
-  let animationData: Buffer;
-  try {
-    animationData = gunzipSync(compressed);
-  } catch {
-    // Accept plain Lottie JSON too, which makes the converter easier to test
-    // and supports clients that already decompressed the TGS payload.
-    animationData = compressed;
-  }
+  const outputPath = uniqueTempName('telegram_sticker', '.gif');
 
-  const { createCanvas, GifDisposal, GifEncoder, LottieAnimation } = await import('@napi-rs/canvas');
-  const animation = LottieAnimation.loadFromData(animationData);
-  const width = Math.round(animation.width);
-  const height = Math.round(animation.height);
-  const frameCount = Math.max(1, Math.round(animation.frames));
-  const fps = Number.isFinite(animation.fps) && animation.fps > 0 ? animation.fps : 30;
-  if (width < 1 || height < 1) throw new Error('TGS animation has invalid dimensions');
-  if (frameCount > 600) throw new Error(`TGS animation has too many frames: ${frameCount}`);
+  // Use Python lottie library (correctly renders TGS stickers unlike @napi-rs/canvas)
+  const pyScript = `
+import sys, os
+from lottie.parsers.tgs import parse_tgs
+from lottie.exporters.gif import export_gif
+anim = parse_tgs(sys.argv[1])
+# skip_frames=2 halves render time while keeping smooth enough animation
+export_gif(anim, sys.argv[2], skip_frames=2)
+`.trim();
 
-  let finalWidth = width;
-  let finalHeight = height;
-  if (width > 256 || height > 256) {
-    if (width > height) {
-      finalWidth = 256;
-      finalHeight = Math.round((height / width) * 256);
-    } else {
-      finalHeight = 256;
-      finalWidth = Math.round((width / height) * 256);
-    }
-  }
+  await new Promise<void>((resolve, reject) => {
+    const ff = spawn('python3', ['-c', pyScript, inputPath, outputPath]);
+    let stderr = '';
+    ff.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+    ff.on('close', code => {
+      if (code === 0) resolve();
+      else reject(new Error(`python3 lottie tgs→gif exit ${code}: ${stderr.slice(0, 500)}`));
+    });
+    ff.on('error', reject);
+  });
 
-  const canvas = createCanvas(finalWidth, finalHeight);
-  const ctx = canvas.getContext('2d');
-  const encoder = new GifEncoder(finalWidth, finalHeight, { repeat: 0, quality: 5 });
-  const delay = Math.max(20, Math.round(1_000 / fps));
-  try {
-    for (let frame = 0; frame < frameCount; frame++) {
-      ctx.clearRect(0, 0, finalWidth, finalHeight);
-      animation.seekFrame(frame);
-      animation.render(ctx);
-      const rgba = ctx.getImageData(0, 0, finalWidth, finalHeight).data;
-      encoder.addFrame(new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength), finalWidth, finalHeight, {
-        delay,
-        disposal: GifDisposal.Background,
-      });
-    }
-    const outputPath = uniqueTempName('telegram_sticker', '.gif');
-    await writeFile(outputPath, encoder.finish());
-    return outputPath;
-  } finally {
-    encoder.dispose();
-  }
+  return outputPath;
 }
 
 /**
  * Extract the first frame of a video as a JPEG thumbnail.
  * Returns the path to the thumbnail file (caller must clean it up).
  */
-export async function extractVideoThumbnail(videoPath: string): Promise<string> {
-  mkdirSync(TMP_DIR, { recursive: true });
-  const outputPath = uniqueTempName('thumb', '.jpg');
-  await new Promise<void>((resolve, reject) => {
-    const ff = spawn('ffmpeg', [
-      '-y', '-i', videoPath,
-      '-vframes', '1',
-      '-q:v', '5',    // quality 1-31, lower=better; 5 is ~90% JPEG
-      '-vf', 'scale=\'min(720,iw)\':-2',  // max 720px wide, keep aspect
-      outputPath,
-    ]);
-    ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg thumb exit ${code}`)));
-    ff.on('error', reject);
-  });
-  return outputPath;
-}
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv']);
@@ -457,4 +422,78 @@ export function detectMediaType(fileNameOrUrl: string): 'image' | 'video' | 'doc
   if (/\.(jpg|jpeg|png|gif|webp)(?:[?#]|$)/.test(lower)) return 'image';
   if (/\.(mp4|mov|avi|mkv|webm)(?:[?#]|$)/.test(lower))  return 'video';
   return 'document';
+}
+
+export async function convertAnimatedToMp4(inputPath: string): Promise<string> {
+  mkdirSync(TMP_DIR, { recursive: true });
+  const outputPath = createSharedTempPath('zalo-tg', 'sticker_', '.mp4');
+  await new Promise<void>((resolve, reject) => {
+    const ff = spawn('ffmpeg', [
+      '-y', '-i', inputPath,
+      // pad to even dimensions (required by yuv420p) and ensure opaque output
+      '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2:color=white,format=yuv420p',
+      '-c:v', 'libx264', '-profile:v', 'main', '-pix_fmt', 'yuv420p',
+      '-r', '30', '-movflags', '+faststart',
+      outputPath,
+    ]);
+    ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg animated to mp4 exit ${code}`)));
+    ff.on('error', reject);
+  });
+  return outputPath;
+}
+
+
+export async function extractVideoThumbnail(videoPath: string): Promise<string> {
+  mkdirSync(TMP_DIR, { recursive: true });
+  const thumbPath = createSharedTempPath('zalo-tg', 'thumb_', '.jpg');
+  await new Promise<void>((resolve, reject) => {
+    const ff = spawn('ffmpeg', [
+      '-y', '-i', videoPath,
+      '-vframes', '1',
+      '-q:v', '2',
+      thumbPath,
+    ]);
+    ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg thumbnail exit ${code}`)));
+    ff.on('error', reject);
+  });
+  return thumbPath;
+}
+
+/** Convert a downloaded static image to a WebP sticker (max 512x512). */
+export async function convertImageToWebpSticker(inputPath: string): Promise<string> {
+  mkdirSync(TMP_DIR, { recursive: true });
+  const outputPath = createSharedTempPath('zalo-tg', 'tg_sticker_', '.webp');
+  await new Promise<void>((resolve, reject) => {
+    // scale to fit within 512x512, keeping aspect ratio
+    const ff = spawn('ffmpeg', [
+      '-y', '-i', inputPath,
+      '-vcodec', 'libwebp',
+      '-vf', "scale='if(gt(iw,ih),512,-1)':'if(gt(iw,ih),-1,512)'",
+      outputPath,
+    ]);
+    ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg image to webp exit ${code}`)));
+    ff.on('error', reject);
+  });
+  return outputPath;
+}
+
+/** Convert a Zalo MP4 video back to a WebM video sticker (VP9, max 512x512, max 3 seconds, no audio). */
+export async function convertMp4ToWebmSticker(inputPath: string): Promise<string> {
+  mkdirSync(TMP_DIR, { recursive: true });
+  const outputPath = createSharedTempPath('zalo-tg', 'tg_sticker_', '.webm');
+  await new Promise<void>((resolve, reject) => {
+    const ff = spawn('ffmpeg', [
+      '-y', '-i', inputPath,
+      '-c:v', 'libvpx-vp9',
+      '-vf', "scale='if(gt(iw,ih),512,-1)':'if(gt(iw,ih),-1,512)'",
+      '-pix_fmt', 'yuva420p',
+      '-b:v', '250k',
+      '-t', '2.9', // strict 3s limit for TG stickers
+      '-an',       // strict no audio
+      outputPath,
+    ]);
+    ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg mp4 to webm exit ${code}`)));
+    ff.on('error', reject);
+  });
+  return outputPath;
 }
