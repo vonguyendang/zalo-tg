@@ -31,7 +31,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip install rlottie pillow
+          pip install lottie pillow
       - run: npm ci
       - run: go test ./...
       - run: npm run tui:build
