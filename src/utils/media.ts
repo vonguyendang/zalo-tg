@@ -234,39 +234,42 @@ export async function convertSpriteSheetToGif(
   frameDurationMs: number,
 ): Promise<string> {
   mkdirSync(TMP_DIR, { recursive: true });
-  const dimensions = await imageSizeFromFile(inputPath);
-  if (!dimensions.width || !dimensions.height) throw new Error('Cannot read sticker sprite dimensions');
-  const layout = getSpriteSheetLayout(dimensions.width, dimensions.height, declaredFrames);
+  const { createCanvas, loadImage, GifEncoder, GifDisposal } = await import('@napi-rs/canvas');
+  
+  const image = await loadImage(inputPath);
+  if (!image.width || !image.height) throw new Error('Cannot read sticker sprite dimensions');
+  const layout = getSpriteSheetLayout(image.width, image.height, declaredFrames);
   if (layout.frames < 2) throw new Error('Sticker sprite does not contain multiple frames');
 
   const duration = Number.isFinite(frameDurationMs)
     ? Math.min(1_000, Math.max(20, frameDurationMs))
     : 100;
-  const frameRate = (1_000 / duration).toFixed(6);
-  const position = layout.direction === 'horizontal'
-    ? `x='mod(n\\,${layout.frames})*${layout.frameWidth}':y=0`
-    : `x=0:y='mod(n\\,${layout.frames})*${layout.frameHeight}'`;
-  const crop = `crop=${layout.frameWidth}:${layout.frameHeight}:${position},format=rgba`;
-  const outputPath = uniqueTempName('zalo_sticker', '.gif');
 
-  await new Promise<void>((resolve, reject) => {
-    const ff = spawn('ffmpeg', [
-      '-y',
-      '-loop', '1',
-      '-framerate', frameRate,
-      '-i', inputPath,
-      '-vf', crop,
-      '-frames:v', String(layout.frames),
-      '-loop', '0',
-      outputPath,
-    ]);
-    let stderr = '';
-    ff.stderr?.on('data', chunk => { stderr += String(chunk).slice(-2_000); });
-    ff.on('close', code => code === 0
-      ? resolve()
-      : reject(new Error(`ffmpeg sprite conversion exit ${code}: ${stderr.trim().slice(-500)}`)));
-    ff.on('error', reject);
-  });
+  const outputPath = uniqueTempName('zalo_sticker', '.gif');
+  const canvas = createCanvas(layout.frameWidth, layout.frameHeight);
+  const ctx = canvas.getContext('2d');
+  const encoder = new GifEncoder(layout.frameWidth, layout.frameHeight, { repeat: 0, quality: 5 });
+
+  for (let i = 0; i < layout.frames; i++) {
+    ctx.clearRect(0, 0, layout.frameWidth, layout.frameHeight);
+    
+    const sx = layout.direction === 'horizontal' ? i * layout.frameWidth : 0;
+    const sy = layout.direction === 'vertical' ? i * layout.frameHeight : 0;
+    
+    ctx.drawImage(
+      image,
+      sx, sy, layout.frameWidth, layout.frameHeight,
+      0, 0, layout.frameWidth, layout.frameHeight
+    );
+    
+    const rgba = ctx.getImageData(0, 0, layout.frameWidth, layout.frameHeight).data;
+    encoder.addFrame(new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength), layout.frameWidth, layout.frameHeight, {
+      delay: duration,
+      disposal: GifDisposal.Background,
+    });
+  }
+
+  await writeFile(outputPath, encoder.finish());
   return outputPath;
 }
 

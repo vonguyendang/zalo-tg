@@ -1059,19 +1059,31 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
               const localPath = await (earlyDlPromise ?? downloadToTemp(singleUrl, `photo_${Date.now()}.jpg`));
               console.log(`[ZaloHandler DEBUG] single photo localPath:`, localPath);
               try {
-                console.log(`[ZaloHandler DEBUG] single photo calling tg.sendPhoto`);
-                const sent = await tg.sendPhoto(
-                  config.telegram.groupId,
-                  'file://' + localPath,
-                  {
-                    ...buf.tgBase,
-                    parse_mode: 'HTML' as const,
-                    caption: (buf.caption
-                      ? `${groupCaption(buf.senderName, buf.delaySuffix)}\n${escapeHtml(buf.caption)}`
-                      : groupCaption(buf.senderName, buf.delaySuffix)),
-                  },
-                );
-                console.log(`[ZaloHandler DEBUG] single photo sendPhoto succeeded:`, sent?.message_id);
+                let sent;
+                const sendOptions = {
+                  ...buf.tgBase,
+                  parse_mode: 'HTML' as const,
+                  caption: (buf.caption
+                    ? `${groupCaption(buf.senderName, buf.delaySuffix)}\n${escapeHtml(buf.caption)}`
+                    : groupCaption(buf.senderName, buf.delaySuffix)),
+                };
+
+                if (localPath.toLowerCase().endsWith('.gif')) {
+                  console.log(`[ZaloHandler DEBUG] single photo calling tg.sendAnimation for GIF`);
+                  sent = await tg.sendAnimation(
+                    config.telegram.groupId,
+                    'file://' + localPath,
+                    sendOptions,
+                  );
+                } else {
+                  console.log(`[ZaloHandler DEBUG] single photo calling tg.sendPhoto`);
+                  sent = await tg.sendPhoto(
+                    config.telegram.groupId,
+                    'file://' + localPath,
+                    sendOptions,
+                  );
+                }
+                console.log(`[ZaloHandler DEBUG] single photo send succeeded:`, sent?.message_id);
                 // Use buf.zaloQuote which already has the correct cliMsgId and
                 // parsed media content object (not raw JSON string).
                 msgStore.save(accountId, sent.message_id, buf.items[0].msgIds, buf.items[0].zaloQuote);
