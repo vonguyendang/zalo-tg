@@ -1257,7 +1257,11 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
         let oggPath: string | undefined;
         try {
           oggPath = await convertToOgg(localPath);
-          const sent = await tg.sendVoice(config.telegram.groupId, { source: oggPath, filename: 'voice.ogg' }, tgOpts);
+          const sent = await tg.sendVoice(
+            config.telegram.groupId, 
+            config.telegram.localServer ? 'file://' + oggPath : { source: oggPath, filename: 'voice.ogg' }, 
+            tgOpts
+          );
           saveTgMapping(sent);
         } finally { 
           await cleanTemp(localPath); 
@@ -1293,8 +1297,11 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
               try {
                 gifPath = await convertSpriteSheetToGif(localPath, detail?.totalFrames || 0, 100);
                 const animCaption = `${groupCaption(bridgeSenderName)} <i>(sticker động)</i>`;
-                sent = await tg.sendAnimation(config.telegram.groupId, { source: gifPath, filename: 'sticker.gif' }, {
-                  ...tgBase,
+                sent = await tg.sendAnimation(
+                  config.telegram.groupId, 
+                  config.telegram.localServer ? 'file://' + gifPath : { source: gifPath, filename: 'sticker.gif' }, 
+                  {
+                    ...tgBase,
                   caption: animCaption,
                   parse_mode: 'HTML',
                 });
