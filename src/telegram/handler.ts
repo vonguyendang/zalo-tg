@@ -43,7 +43,7 @@ import type { ZaloAPI } from '../zalo/types.js';
 import { store, msgStore, userCache, friendsCache, groupsCache, sentMsgStore, pollStore, mediaGroupStore, reactionEchoStore, reactionSummaryStore, reactionEventDedupeStore, aliasCache, markRecalled, accountAliasStore, type ZaloQuoteData } from '../store.js';
 import { tgBot, BOT_COMMANDS, COMMAND_DETAILS } from './bot.js';
 import { config } from '../config.js';
-import { downloadToTemp, cleanTemp, convertToM4a, extractVideoThumbnail, convertWebmToGif } from '../utils/media.js';
+import { downloadToTemp, cleanTemp, convertToAac, extractVideoThumbnail, convertWebmToGif } from '../utils/media.js';
 import { triggerQRLogin, getAllZaloApis, cancelActiveQRLogin } from '../zalo/client.js';
 import { triggerAppLogin, cancelActiveAppLogin } from '../zalo/loginApp.js';
 import { invalidateAppSession, appGetReceivedFriendRequests, appGetSentFriendRequests, appGetGroupInfo, appGetGroupMembersInfo, appGetFriendProfilesV2, appRequestVoiceCall, appRequestGroupVoiceCall } from '../zalo/appApi.js';
@@ -3266,7 +3266,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
           await notifyTooBig(`voice_${Date.now()}.ogg`, msg.voice.file_size);
           return;
         }
-        // Download OGG from TG, convert to M4A, upload to Zalo, send as voice bubble
+        // Download OGG from TG, convert to AAC, upload to Zalo, send as voice bubble
         let fileLink: URL;
         try { fileLink = await ctx.telegram.getFileLink(msg.voice.file_id); }
         catch (err: unknown) {
@@ -3275,11 +3275,12 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
           throw err;
         }
         const oggPath  = await downloadToTemp(fileLink.toString(), `voice_${Date.now()}.ogg`);
-        let m4aPath: string | undefined;
+        let aacPath: string | undefined;
         try {
-          m4aPath = await convertToM4a(oggPath);
+          aacPath = await convertToAac(oggPath);
+          const aacStat = await stat(aacPath);
           // Upload to Zalo CDN to get a voiceUrl
-          const uploaded = await api.uploadAttachment(m4aPath, zaloId, threadType) as Array<{ fileUrl?: string, fileId?: string, checksum?: string, fileSize?: number }>;
+          const uploaded = await api.uploadAttachment(aacPath, zaloId, threadType) as Array<{ fileUrl?: string, fileId?: string, checksum?: string, fileSize?: number }>;
           const voiceUpload = uploaded[0];
           const voiceUrl = voiceUpload?.fileUrl;
           if (!voiceUrl) throw new Error('No fileUrl from uploadAttachment');
@@ -3293,7 +3294,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
               duration: voiceDurationMs,
               fileId: voiceUpload.fileId,
               checksum: voiceUpload.checksum,
-              fileSize: voiceUpload.fileSize
+              fileSize: aacStat.size
             } as any,
             zaloId,
             threadType,
@@ -3321,7 +3322,7 @@ export function setupTelegramHandler(initialApi: any, onLoginCb: any) {
           await sendAttachment(msg.voice.file_id, `voice_${Date.now()}.ogg`);
         } finally {
           await cleanTemp(oggPath);
-          if (m4aPath) await cleanTemp(m4aPath);
+          if (aacPath) await cleanTemp(aacPath);
         }
         return;
       }

@@ -292,19 +292,17 @@ export async function convertToOgg(inputPath: string): Promise<string> {
 }
 
 /**
- * Convert an audio file to M4A (AAC) using ffmpeg.
+ * Convert an audio file to AAC (ADTS) using ffmpeg.
  * Returns the path to the converted file (caller must clean it up).
  */
-export async function convertToM4a(inputPath: string): Promise<string> {
+export async function convertToAac(inputPath: string): Promise<string> {
   mkdirSync(TMP_DIR, { recursive: true });
-  const outputPath = uniqueTempName('voice', '.m4a');
+  const outputPath = uniqueTempName('voice', '.aac');
   await new Promise<void>((resolve, reject) => {
     const ff = spawn('ffmpeg', [
       '-y', '-i', inputPath,
-      // Keep an iOS/Android-friendly AAC-LC profile and put moov atom first.
-      // Some mobile clients show "--:--" or fail playback if metadata is tail-loaded.
+      // Keep an iOS/Android-friendly AAC-LC profile. Zalo uses raw AAC streams.
       '-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '64k', '-ac', '1', '-ar', '44100',
-      '-movflags', '+faststart',
       '-vn', outputPath,
     ]);
     ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}`)));
@@ -327,7 +325,7 @@ export async function convertWebmToGif(inputPath: string): Promise<string> {
     await new Promise<void>((resolve, reject) => {
       const ff = spawn('ffmpeg', [
         '-y', '-i', inputPath,
-        '-vf', 'scale=min(512\\,iw):-2:flags=lanczos,format=rgba,palettegen=stats_mode=diff:reserve_transparent=1',
+        '-vf', 'scale=min(256\\,iw):-2:flags=lanczos,format=rgba,palettegen=stats_mode=diff:reserve_transparent=1',
         palettePass,
       ]);
       ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg palettegen exit ${code}`)));
@@ -336,7 +334,7 @@ export async function convertWebmToGif(inputPath: string): Promise<string> {
     await new Promise<void>((resolve, reject) => {
       const ff = spawn('ffmpeg', [
         '-y', '-i', inputPath, '-i', palettePass,
-        '-lavfi', 'scale=min(512\\,iw):-2:flags=lanczos,format=rgba[x];[x][1:v]paletteuse=dither=sierra2_4a:alpha_threshold=128',
+        '-lavfi', 'scale=min(256\\,iw):-2:flags=lanczos,format=rgba[x];[x][1:v]paletteuse=dither=sierra2_4a:alpha_threshold=128',
         outputPath,
       ]);
       ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg paletteuse exit ${code}`)));
@@ -385,17 +383,29 @@ export async function convertTgsToGif(inputPath: string): Promise<string> {
   if (width < 1 || height < 1) throw new Error('TGS animation has invalid dimensions');
   if (frameCount > 600) throw new Error(`TGS animation has too many frames: ${frameCount}`);
 
-  const canvas = createCanvas(width, height);
+  let finalWidth = width;
+  let finalHeight = height;
+  if (width > 256 || height > 256) {
+    if (width > height) {
+      finalWidth = 256;
+      finalHeight = Math.round((height / width) * 256);
+    } else {
+      finalHeight = 256;
+      finalWidth = Math.round((width / height) * 256);
+    }
+  }
+
+  const canvas = createCanvas(finalWidth, finalHeight);
   const ctx = canvas.getContext('2d');
-  const encoder = new GifEncoder(width, height, { repeat: 0, quality: 5 });
+  const encoder = new GifEncoder(finalWidth, finalHeight, { repeat: 0, quality: 5 });
   const delay = Math.max(20, Math.round(1_000 / fps));
   try {
     for (let frame = 0; frame < frameCount; frame++) {
-      ctx.clearRect(0, 0, width, height);
+      ctx.clearRect(0, 0, finalWidth, finalHeight);
       animation.seekFrame(frame);
       animation.render(ctx);
-      const rgba = ctx.getImageData(0, 0, width, height).data;
-      encoder.addFrame(new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength), width, height, {
+      const rgba = ctx.getImageData(0, 0, finalWidth, finalHeight).data;
+      encoder.addFrame(new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength), finalWidth, finalHeight, {
         delay,
         disposal: GifDisposal.Background,
       });

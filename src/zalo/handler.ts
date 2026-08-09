@@ -9,7 +9,7 @@ import { ZALO_MSG_TYPES } from './types.js';
 import { store, accountAliasStore } from '../store.js';
 import { tgBot } from '../telegram/bot.js';
 import { config } from '../config.js';
-import { downloadToTemp, cleanTemp, convertToOgg } from '../utils/media.js';
+import { downloadToTemp, cleanTemp, convertToOgg, convertSpriteSheetToGif } from '../utils/media.js';
 import { applyZaloMarkupHtml, formatGroupMsgHtml, formatGroupMsg, groupCaption, topicName, truncate, escapeHtml } from '../utils/format.js';
 import { extractHiddenData } from '../utils/steganography.js';
 import { maybeAutoReply } from './autoReply.js';
@@ -1278,13 +1278,26 @@ export async function setupZaloHandler(api: ZaloAPI, accountId: string, accountN
           try {
             let sent: { message_id: number };
             if (isAnimated) {
-              // Animated stickers are sprite sheets — send as photo with label
-              const animCaption = `${groupCaption(bridgeSenderName)} <i>(sticker động 🎥)</i>`;
-              sent = await tg.sendPhoto(config.telegram.groupId, 'file://' + localPath, {
-                ...tgBase,
-                caption: animCaption,
-                parse_mode: 'HTML',
-              });
+              let gifPath: string | undefined;
+              try {
+                gifPath = await convertSpriteSheetToGif(localPath, detail?.totalFrames || 0, 100);
+                const animCaption = `${groupCaption(bridgeSenderName)} <i>(sticker động)</i>`;
+                sent = await tg.sendAnimation(config.telegram.groupId, { source: gifPath, filename: 'sticker.gif' }, {
+                  ...tgBase,
+                  caption: animCaption,
+                  parse_mode: 'HTML',
+                });
+              } catch (animErr) {
+                console.error('[ZaloHandler] Failed to convert animated sticker to GIF, falling back to photo:', animErr);
+                const animCaption = `${groupCaption(bridgeSenderName)} <i>(sticker động 🎥)</i>`;
+                sent = await tg.sendPhoto(config.telegram.groupId, 'file://' + localPath, {
+                  ...tgBase,
+                  caption: animCaption,
+                  parse_mode: 'HTML',
+                });
+              } finally {
+                if (gifPath) await cleanTemp(gifPath);
+              }
             } else {
               try {
                 // Try native TG sticker (webp ≤512 KB displays as a proper sticker)
