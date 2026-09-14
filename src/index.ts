@@ -217,7 +217,13 @@ async function main(): Promise<void> {
       try {
         // Dừng các listener cũ trước khi khởi tạo lại để tránh trùng lặp
         for (const api of getAllZaloApis().values()) {
-          try { api.listener.stop(); } catch (e) {}
+          try {
+            if (typeof api.listener.removeAllListeners === 'function') {
+              api.listener.removeAllListeners('closed');
+              api.listener.removeAllListeners('disconnected');
+            }
+            api.listener.stop();
+          } catch (e) {}
         }
   
         const {apis} = await initAllZaloApis();
@@ -241,7 +247,13 @@ async function main(): Promise<void> {
          // Dừng listener cũ nếu đang chạy
          const oldApi = allApis.get(accountId);
          if (oldApi) {
-           try { oldApi.listener.stop(); } catch (e) {}
+           try {
+             if (typeof oldApi.listener.removeAllListeners === 'function') {
+               oldApi.listener.removeAllListeners('closed');
+               oldApi.listener.removeAllListeners('disconnected');
+             }
+             oldApi.listener.stop();
+           } catch (e) {}
          }
          
          try {
