@@ -107,6 +107,18 @@ if [[ -f "\$SETTINGS_FILE" ]]; then source "\$SETTINGS_FILE"; fi
 /usr/bin/git checkout "${BOT_BRANCH:-multi-zalo}" >> "\$LOG_DIR/git.log" 2>&1
 /usr/bin/pkill telegram-bot-api 2>/dev/null || true
 
+# Tự động cài đặt dependency nếu thiếu node_modules
+if [[ ! -d "node_modules" ]]; then
+  echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Phát hiện thiếu node_modules, đang tự động chạy npm install..." >> "\$LOG_DIR/build.log"
+  npm install >> "\$LOG_DIR/build.log" 2>&1 || true
+fi
+
+# Tự động build nếu chưa có dist
+if [[ ! -d "dist" || ! -f "dist/index.js" ]]; then
+  echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Phát hiện thiếu dist/index.js, đang tự động chạy npm run build..." >> "\$LOG_DIR/build.log"
+  npm run build >> "\$LOG_DIR/build.log" 2>&1 || true
+fi
+
 ./run-bot-api.sh >> "\$LOG_DIR/bot-api.log" 2>&1 &
 
 for i in {1..30}; do
@@ -147,6 +159,8 @@ cat > "$PLIST" <<PLISTEOF
     <key>SuccessfulExit</key>
     <false/>
   </dict>
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
   <key>WorkingDirectory</key>
   <string>$PROJECT_DIR</string>
   <key>StandardOutPath</key>
@@ -166,10 +180,33 @@ is_loaded() {
   launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1
 }
 
+build_project() {
+  cd "$PROJECT_DIR"
+  if [[ ! -d "node_modules" ]]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Phát hiện thiếu node_modules, đang chạy npm install..." >> "$LOG_DIR/build.log"
+    if ! npm install >> "$LOG_DIR/build.log" 2>&1; then
+      echo "[$(date '+%Y-%m-%d %H:%M:%S')] Lỗi: npm install thất bại!" >> "$LOG_DIR/build.log"
+      return 1
+    fi
+  fi
+  if ! npm run build >> "$LOG_DIR/build.log" 2>&1; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Lỗi: npm run build thất bại!" >> "$LOG_DIR/build.log"
+    return 1
+  fi
+  return 0
+}
+
 start_bot() {
   local silent="${1:-}"
   clean_old_logs
-  cd "$PROJECT_DIR" && npm run build >> "$LOG_DIR/build.log" 2>&1
+  if ! build_project; then
+    send_tg_notification "❌ <b>Khởi động bot thất bại:</b> Lỗi biên dịch mã nguồn (Build failed)!
+Vui lòng kiểm tra file <code>~/Library/Logs/zalo-bot-control/build.log</code> để xem chi tiết."
+    if [[ "$silent" != "silent" ]]; then
+      osascript -e 'tell me' -e 'activate' -e 'display dialog "Lỗi: Biên dịch mã nguồn thất bại. Vui lòng kiểm tra build.log!" buttons {"OK"} default button "OK" with title "Zalo Bot Control"' -e 'end tell'
+    fi
+    return 1
+  fi
   write_run_script
   write_plist
   launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
@@ -201,11 +238,18 @@ stop_bot() {
 
 restart_bot() {
   local silent="${1:-}"
+  clean_old_logs
+  if ! build_project; then
+    send_tg_notification "❌ <b>Khởi động lại bot thất bại:</b> Lỗi biên dịch mã nguồn (Build failed)!
+Vui lòng kiểm tra file <code>~/Library/Logs/zalo-bot-control/build.log</code> để xem chi tiết."
+    if [[ "$silent" != "silent" ]]; then
+      osascript -e 'tell me' -e 'activate' -e 'display dialog "Lỗi: Biên dịch mã nguồn thất bại. Vui lòng kiểm tra build.log!" buttons {"OK"} default button "OK" with title "Zalo Bot Control"' -e 'end tell'
+    fi
+    return 1
+  fi
   launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
   /usr/bin/pkill -f "node dist/index.js" >/dev/null 2>&1 || true
   /usr/bin/pkill telegram-bot-api >/dev/null 2>&1 || true
-  clean_old_logs
-  cd "$PROJECT_DIR" && npm run build >> "$LOG_DIR/build.log" 2>&1
   write_run_script
   write_plist
   launchctl bootstrap "gui/$(id -u)" "$PLIST"
