@@ -122,7 +122,7 @@ fi
 ./run-bot-api.sh >> "\$LOG_DIR/bot-api.log" 2>&1 &
 
 for i in {1..30}; do
-  if nc -z 127.0.0.1 8081; then
+  if nc -z 127.0.0.1 8081 && curl -s http://127.0.0.1:8081/ >/dev/null 2>&1; then
     break
   fi
   sleep 1

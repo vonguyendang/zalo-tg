@@ -290,20 +290,45 @@ async function main(): Promise<void> {
   tgBot.botInfo = {
     id: parseInt(botId, 10),
     is_bot: true,
-    first_name: 'Zalo TG Bridge',
-    username: 'zalo_tg_bridge_bot',
+    first_name: 'Zalo',
+    username: 'zalo_to_telegram_bot',
     can_join_groups: true,
     can_read_all_group_messages: true,
     supports_inline_queries: false
   };
 
-  tgBot.launch({ allowedUpdates: ['message', 'callback_query', 'message_reaction', 'poll_answer', 'poll'] })
-    .then(() => {
-      console.log('[Boot] Telegram bot started ✓');
-    })
-    .catch((err) => {
-      console.warn('[Boot] Telegram bot launch failed (ignored):', err);
-    });
+  const startTelegramPolling = async (): Promise<void> => {
+    let attempt = 0;
+    while (true) {
+      attempt++;
+      try {
+        for (let check = 1; check <= 30; check++) {
+          try {
+            const me = await tgBot.telegram.getMe();
+            tgBot.botInfo = me;
+            break;
+          } catch (e) {
+            if (check === 30) throw e;
+            await new Promise(r => setTimeout(r, 1000));
+          }
+        }
+
+        console.log(`[Boot] Starting Telegram long polling (attempt ${attempt})...`);
+        await tgBot.launch(
+          { allowedUpdates: ['message', 'callback_query', 'message_reaction', 'poll_answer', 'poll'] },
+          () => {
+            console.log('[Boot] Telegram bot started and listening for updates ✓');
+          }
+        );
+        console.warn('[Telegram] Long polling stopped unexpectedly. Reconnecting in 5s...');
+      } catch (err) {
+        console.error(`[Boot] Telegram bot launch/polling failed (attempt ${attempt}):`, err);
+      }
+      await new Promise(r => setTimeout(r, 5000));
+    }
+  };
+
+  void startTelegramPolling();
 
   setTelegramErrorReporter((msg) => {
     void (async () => {
